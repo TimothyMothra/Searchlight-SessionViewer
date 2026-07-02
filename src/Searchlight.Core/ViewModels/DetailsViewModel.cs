@@ -16,18 +16,21 @@ public sealed partial class DetailsViewModel : ObservableObject
 {
     private readonly ISessionDataSource _dataSource;
     private readonly IResumeLauncher _resume;
+    private readonly IClipboardService _clipboard;
 
-    /// <summary>Creates a details view-model bound to the data source and resume launcher.</summary>
-    public DetailsViewModel(ISessionDataSource dataSource, IResumeLauncher resume)
+    /// <summary>Creates a details view-model bound to the data source, resume launcher, and clipboard.</summary>
+    public DetailsViewModel(ISessionDataSource dataSource, IResumeLauncher resume, IClipboardService clipboard)
     {
         _dataSource = dataSource;
         _resume = resume;
+        _clipboard = clipboard;
     }
 
     /// <summary>The session currently shown, enriched with events-head data.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSession))]
     [NotifyCanExecuteChangedFor(nameof(ResumeCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CopyIdCommand))]
     private SessionInfo? _session;
 
     /// <summary>True when a session is loaded (drives empty-state visibility).</summary>
@@ -98,4 +101,19 @@ public sealed partial class DetailsViewModel : ObservableObject
     }
 
     private bool CanResume() => Session is not null;
+
+    /// <summary>Copies the current session id (full GUID) to the system clipboard.</summary>
+    [RelayCommand(CanExecute = nameof(CanResume))]
+    private void CopyId()
+    {
+        if (Session is null)
+        {
+            return;
+        }
+
+        bool ok = _clipboard.SetText(Session.Id);
+        StatusMessage = ok
+            ? "Session id copied to clipboard."
+            : "Could not copy the session id to the clipboard.";
+    }
 }

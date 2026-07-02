@@ -47,6 +47,7 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<ISessionDataSource, MockSessionDataSource>();
             // Inert platform services so a mock host needs only a dispatcher.
             services.AddSingleton<IResumeLauncher, MockResumeLauncher>();
+            services.AddSingleton<IClipboardService, MockClipboardService>();
             services.AddSingleton<ISessionWatcher, NullSessionWatcher>();
         }
         else

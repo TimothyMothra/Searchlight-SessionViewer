@@ -268,10 +268,20 @@
                             <TextBlock Text="{x:Bind ViewModel.Details.Session.DisplayName, Mode=OneWay}"
                                        Style="{StaticResource TitleTextBlockStyle}"
                                        TextTrimming="CharacterEllipsis" MaxLines="2" />
-                            <TextBlock Text="{x:Bind ViewModel.Details.Session.Id, Mode=OneWay}"
-                                       FontFamily="Consolas" FontSize="12"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       IsTextSelectionEnabled="True" />
+                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind ViewModel.Details.Session.Id, Mode=OneWay}"
+                                           FontFamily="Consolas" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           IsTextSelectionEnabled="True"
+                                           VerticalAlignment="Center" />
+                                <Button Command="{x:Bind ViewModel.Details.CopyIdCommand}"
+                                        Padding="4" MinWidth="0"
+                                        Background="Transparent" BorderThickness="0"
+                                        VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="Copy session ID">
+                                    <FontIcon Glyph="&#xE8C8;" FontSize="12" />
+                                </Button>
+                            </StackPanel>
                         </StackPanel>
                         <Button Grid.Column="1"
                                 Style="{StaticResource AccentButtonStyle}"

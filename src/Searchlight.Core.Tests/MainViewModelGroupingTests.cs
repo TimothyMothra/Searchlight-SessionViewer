@@ -17,7 +17,7 @@ public sealed class MainViewModelGroupingTests
         var dataSource = new MockSessionDataSource();
         var resume = new MockResumeLauncher();
         var watcher = new NullSessionWatcher();
-        var details = new DetailsViewModel(dataSource, resume);
+        var details = new DetailsViewModel(dataSource, resume, new MockClipboardService());
         var settings = new SettingsService();
         var dispatcher = new InlineUiDispatcher();
 

@@ -12,10 +12,9 @@ by design — support for other agents (e.g. Claude Code) is a planned extension
 
 ## Screenshot
 
-<!-- Add a screenshot here. Build with the Demo config (synthetic data) so no real session
-     content is shown: dotnet run --project src/Searchlight -c Demo -->
+![Searchlight showing synthetic Demo sessions grouped by recency](docs/images/screenshot.png)
 
-_Screenshot placeholder — capture using the `Demo` build config so no proprietary data is shown._
+_Captured using the `Demo` build config (synthetic data) so no proprietary session content is shown._
 
 ## What it does
 

@@ -341,6 +341,7 @@ public partial class App : Application
         {
             // Live mode: real resume launcher (copilot --resume=<id>) + FileSystemWatcher.
             services.AddSingleton<IResumeLauncher, ResumeLauncher>();
+            services.AddSingleton<IClipboardService, ClipboardService>();
             services.AddSingleton<ISessionWatcher, SessionWatcher>();
         }
 
