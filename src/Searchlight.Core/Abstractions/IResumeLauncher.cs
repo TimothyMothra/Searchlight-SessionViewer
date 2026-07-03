@@ -1,10 +1,12 @@
 namespace Searchlight.Abstractions;
 
 /// <summary>
-/// Launches a resumed Copilot session. Abstracted so the platform-neutral core can
-/// reference it without taking a dependency on the Windows-only terminal launcher.
-/// The Windows front-end implements this over <c>wt.exe</c>/<c>cmd.exe</c>; a mock
-/// implementation is used for the demo/mock data source.
+/// Launches a resumed agent session in a terminal. Abstracted so the
+/// platform-neutral core can reference it without taking a dependency on any
+/// concrete terminal launcher. The WinUI front-end implements this for Copilot
+/// over <c>wt.exe</c>/<c>cmd.exe</c>; the Avalonia front-end implements it for
+/// Claude Code over the platform terminal; a mock implementation is used for
+/// the demo/mock data source.
 /// </summary>
 public interface IResumeLauncher
 {

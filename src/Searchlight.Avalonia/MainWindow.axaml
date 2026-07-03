@@ -1,0 +1,222 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:models="clr-namespace:Searchlight.Models;assembly=Searchlight.Core"
+        xmlns:local="clr-namespace:Searchlight.Avalonia"
+        x:Class="Searchlight.Avalonia.MainWindow"
+        Title="Searchlight — Historical Session Viewer"
+        Width="1150" Height="740"
+        MinWidth="760" MinHeight="440">
+
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <!-- Search + refresh + settings -->
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="16,12,16,8">
+      <TextBox Grid.Column="0"
+               Watermark="Search name, id, folder, branch, prompt…"
+               Text="{Binding SearchText, Mode=TwoWay}"
+               VerticalAlignment="Center" />
+      <Button Grid.Column="1" Margin="12,0,0,0" Padding="10,6"
+              Content="⟳" FontSize="16"
+              ToolTip.Tip="Refresh"
+              Command="{Binding RefreshCommand}"
+              VerticalAlignment="Center" />
+      <Button Grid.Column="2" Margin="6,0,0,0" Padding="10,6"
+              Content="⚙" FontSize="16"
+              ToolTip.Tip="Settings"
+              VerticalAlignment="Center">
+        <Button.Flyout>
+          <Flyout>
+            <StackPanel Width="320" Spacing="8">
+              <TextBlock Text="Settings" FontSize="16" FontWeight="SemiBold" />
+              <TextBlock Text="Resume with permissions skipped"
+                         FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock TextWrapping="Wrap" FontSize="12" Opacity="0.7"
+                         Text="When on, resuming a session appends --dangerously-skip-permissions so it runs with all tool approvals auto-granted (no per-action confirmation). Off by default." />
+              <ToggleSwitch OnContent="On" OffContent="Off"
+                            IsChecked="{Binding Settings.Current.AppendYolo, Mode=TwoWay}" />
+            </StackPanel>
+          </Flyout>
+        </Button.Flyout>
+      </Button>
+    </Grid>
+
+    <!-- Body: list (left) + divider + details (right) -->
+    <Grid Grid.Row="1" ColumnDefinitions="380,Auto,*">
+
+      <ListBox Grid.Column="0" x:Name="SessionList"
+               Margin="8,0,8,8"
+               SelectionChanged="OnSessionSelectionChanged"
+               DoubleTapped="OnSessionDoubleTapped">
+        <ListBox.Styles>
+          <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="CornerRadius" Value="6" />
+          </Style>
+        </ListBox.Styles>
+        <ListBox.DataTemplates>
+
+          <DataTemplate DataType="local:HeaderItem">
+            <TextBlock Text="{Binding Title}"
+                       FontSize="12" FontWeight="SemiBold" Opacity="0.6"
+                       Margin="0,6,0,0" />
+          </DataTemplate>
+
+          <DataTemplate DataType="models:SessionInfo">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+                <TextBlock Text="{Binding DisplayName}"
+                           FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Cwd, Converter={x:Static local:Converters.StringOrDash}}"
+                           FontSize="12" Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{Binding Branch, Converter={x:Static local:Converters.StringOrDash}}"
+                             FontSize="11" Opacity="0.5"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="•" FontSize="11" Opacity="0.5" />
+                  <TextBlock Text="{Binding UpdatedAt, Converter={x:Static local:Converters.RelativeTime}}"
+                             FontSize="11" Opacity="0.5" />
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Top">
+                <Border Background="#C15F3C" CornerRadius="4" Padding="6,2"
+                        HorizontalAlignment="Right">
+                  <TextBlock Text="{Binding ClientLabel}" FontSize="10" Foreground="White" />
+                </Border>
+                <Border Background="#30808080" CornerRadius="4" Padding="6,2"
+                        HorizontalAlignment="Right">
+                  <TextBlock Text="{Binding Kind}" FontSize="10" Opacity="0.8" />
+                </Border>
+              </StackPanel>
+            </Grid>
+          </DataTemplate>
+
+        </ListBox.DataTemplates>
+      </ListBox>
+
+      <Border Grid.Column="1" Width="1" Background="#30808080" />
+
+      <!-- Details pane -->
+      <Grid Grid.Column="2">
+
+        <!-- Empty state -->
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8"
+                    IsVisible="{Binding !Details.HasSession}">
+          <TextBlock Text="🔦" FontSize="40" HorizontalAlignment="Center" />
+          <TextBlock Text="Select a session" FontWeight="SemiBold"
+                     HorizontalAlignment="Center" />
+          <TextBlock Text="Details and the first prompt appear here."
+                     Opacity="0.65" HorizontalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Details content: pinned header + scrolling body -->
+        <Grid RowDefinitions="Auto,*" IsVisible="{Binding Details.HasSession}">
+
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="20,16,20,8">
+            <StackPanel Grid.Column="0" Spacing="2" Margin="0,0,12,0">
+              <TextBlock Text="{Binding Details.Session.DisplayName}"
+                         FontSize="22" FontWeight="SemiBold"
+                         TextWrapping="Wrap" MaxLines="2"
+                         TextTrimming="CharacterEllipsis" />
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{Binding Details.Session.Id}"
+                           FontFamily="Menlo,Monaco,Consolas,monospace" FontSize="12"
+                           Opacity="0.65" VerticalAlignment="Center" />
+                <Button Padding="4" MinWidth="0"
+                        Background="Transparent" BorderThickness="0"
+                        Content="⧉" FontSize="12"
+                        ToolTip.Tip="Copy session ID"
+                        Command="{Binding Details.CopyIdCommand}"
+                        VerticalAlignment="Center" />
+              </StackPanel>
+            </StackPanel>
+            <Button Grid.Column="1" Classes="accent" VerticalAlignment="Top"
+                    Command="{Binding Details.ResumeCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="▶" FontSize="13" />
+                <TextBlock Text="Resume" />
+              </StackPanel>
+            </Button>
+          </Grid>
+
+          <ScrollViewer Grid.Row="1" Margin="20,0,20,16">
+            <StackPanel Spacing="16">
+
+              <TextBlock Text="{Binding Details.StatusMessage}"
+                         Opacity="0.7"
+                         IsVisible="{Binding Details.StatusMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+              <!-- Field card -->
+              <Border Background="#18808080" BorderBrush="#30808080"
+                      BorderThickness="1" CornerRadius="8" Padding="16">
+                <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                  <Grid.Styles>
+                    <Style Selector="TextBlock.label">
+                      <Setter Property="FontSize" Value="12" />
+                      <Setter Property="Opacity" Value="0.6" />
+                      <Setter Property="Margin" Value="0,0,16,10" />
+                    </Style>
+                    <Style Selector="TextBlock.value">
+                      <Setter Property="FontSize" Value="13" />
+                      <Setter Property="TextWrapping" Value="Wrap" />
+                      <Setter Property="Margin" Value="0,0,0,10" />
+                    </Style>
+                  </Grid.Styles>
+
+                  <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Folder" />
+                  <TextBlock Grid.Row="0" Grid.Column="1" Classes="value"
+                             Text="{Binding Details.Session.Cwd, Converter={x:Static local:Converters.StringOrDash}}" />
+
+                  <TextBlock Grid.Row="1" Grid.Column="0" Classes="label" Text="Branch" />
+                  <TextBlock Grid.Row="1" Grid.Column="1" Classes="value"
+                             Text="{Binding Details.Session.Branch, Converter={x:Static local:Converters.StringOrDash}}" />
+
+                  <TextBlock Grid.Row="2" Grid.Column="0" Classes="label" Text="Model" />
+                  <TextBlock Grid.Row="2" Grid.Column="1" Classes="value"
+                             Text="{Binding Details.Session.Model, Converter={x:Static local:Converters.StringOrDash}}" />
+
+                  <TextBlock Grid.Row="3" Grid.Column="0" Classes="label" Text="CLI version" />
+                  <TextBlock Grid.Row="3" Grid.Column="1" Classes="value"
+                             Text="{Binding Details.Session.CopilotVersion, Converter={x:Static local:Converters.StringOrDash}}" />
+
+                  <TextBlock Grid.Row="4" Grid.Column="0" Classes="label" Text="Updated" />
+                  <TextBlock Grid.Row="4" Grid.Column="1" Classes="value"
+                             Text="{Binding Details.Session.UpdatedAt, Converter={x:Static local:Converters.RelativeTime}}" />
+
+                  <TextBlock Grid.Row="5" Grid.Column="0" Classes="label" Text="Activity" />
+                  <TextBlock Grid.Row="5" Grid.Column="1" Classes="value"
+                             Text="{Binding Details.Session.JournalActivity, Converter={x:Static local:Converters.StringOrDash}}" />
+
+                  <TextBlock Grid.Row="6" Grid.Column="0" Classes="label" Text="First prompt" />
+                  <TextBlock Grid.Row="6" Grid.Column="1" Classes="value" MaxLines="24"
+                             TextTrimming="CharacterEllipsis"
+                             Text="{Binding Details.Session.FirstPromptPreview, Converter={x:Static local:Converters.StringOrDash}}" />
+
+                  <TextBlock Grid.Row="7" Grid.Column="0" Classes="label" Text="Client" />
+                  <TextBlock Grid.Row="7" Grid.Column="1" Classes="value"
+                             Text="{Binding Details.Session.ClientNameRaw}" />
+                </Grid>
+              </Border>
+
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Grid>
+    </Grid>
+
+    <!-- Status bar -->
+    <Border Grid.Row="2" Padding="16,8"
+            Background="#18808080" BorderBrush="#30808080" BorderThickness="0,1,0,0">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="{Binding VisibleCount}" FontSize="12" Opacity="0.7" />
+        <TextBlock Text="of" FontSize="12" Opacity="0.7" />
+        <TextBlock Text="{Binding TotalCount}" FontSize="12" Opacity="0.7" />
+        <TextBlock Text="sessions" FontSize="12" Opacity="0.7" />
+        <TextBlock Text="· loading…" FontSize="12" Opacity="0.7"
+                   IsVisible="{Binding IsLoading}" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

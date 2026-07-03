@@ -7,6 +7,11 @@ with one click.
 Today it reads **GitHub Copilot** sessions from `~/.copilot/`. The data layer is agent-neutral
 by design — support for other agents (e.g. Claude Code) is a planned extension.
 
+> **This fork** adds both halves of that extension: a **Claude Code** data source reading
+> `~/.claude/projects/`, and a cross-platform **Avalonia** host so the GUI runs on macOS and
+> Linux (resuming via `claude --resume` in the platform terminal). See
+> [macOS / Claude Code](#macos--claude-code-avalonia-host) below.
+
 > **Status:** feature-complete and running. A WinUI host + a platform-neutral Core library + an
 > xUnit test project (36 tests green).
 
@@ -51,6 +56,33 @@ Requires the **.NET 10 SDK** (pinned via `global.json`) on Windows.
 | Tray (default) | `dotnet run --project src/Searchlight` | Live `~/.copilot` |
 | No tray | append `--no-tray` | Live `~/.copilot` |
 | Demo / mock | `Demo` build config, or `--demo` flag | Synthetic (15 sessions) |
+
+## macOS / Claude Code (Avalonia host)
+
+`src/Searchlight.Avalonia` is a cross-platform front-end over the same Core library, backed by
+the **Claude Code** session store instead of Copilot's:
+
+- Reads `~/.claude/projects/` — the per-project `sessions-index.json` for the cheap bulk list
+  (summary, first prompt, message count, branch, timestamps), merged with any un-indexed
+  `<uuid>.jsonl` transcripts on disk. Transcript head-parsing (model, CLI version) is deferred
+  until a row is selected, mirroring the Copilot source.
+- **One-click Resume** — `cd <workspace> && claude --resume <id>` in Terminal.app on macOS
+  (`x-terminal-emulator` on Linux, `cmd` on Windows).
+- **Read-only by design** — never writes to `~/.claude`.
+
+```bash
+# Run the unit tests (any OS)
+dotnet test src/Searchlight.Core.Tests/Searchlight.Core.Tests.csproj
+
+# Run against your real Claude Code sessions
+dotnet run --project src/Searchlight.Avalonia
+
+# Run against synthetic data
+dotnet run --project src/Searchlight.Avalonia -- --demo
+```
+
+Building `Searchlight.slnx` as a whole still requires Windows (the WinUI host); on macOS/Linux
+build the individual projects above.
 
 ## Documentation
 

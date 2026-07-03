@@ -85,6 +85,7 @@ public sealed record SessionInfo
         {
             "github/cli" => "CLI",
             "github/autopilot" => "App",
+            "claude/code" => "Claude",
             _ => "Unknown",
         };
 

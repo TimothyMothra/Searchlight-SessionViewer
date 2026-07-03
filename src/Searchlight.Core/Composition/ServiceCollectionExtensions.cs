@@ -62,4 +62,48 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Registers the core services and view-models backed by the Claude Code
+    /// session store (<c>~/.claude/projects</c>) instead of Copilot's
+    /// <c>~/.copilot</c>. When <paramref name="useMock"/> is <c>true</c>, the
+    /// synthetic <see cref="MockSessionDataSource"/> is used and inert platform
+    /// services are supplied, so the host only needs to add a
+    /// <see cref="IUiDispatcher"/>. In live mode the host must register an
+    /// <see cref="IResumeLauncher"/> and <see cref="IClipboardService"/>; a
+    /// <see cref="ClaudeSessionWatcher"/> is registered here since it has no
+    /// platform dependencies.
+    /// </summary>
+    public static IServiceCollection AddClaudeCore(this IServiceCollection services, bool useMock)
+    {
+        // Read-only source readers (stateless singletons).
+        services.AddSingleton<ClaudeSessionIndexReader>();
+        services.AddSingleton<ClaudeJsonlHeadReader>();
+
+        services.TryAddSingleton<SettingsService>();
+
+        if (useMock)
+        {
+            services.AddSingleton<ISessionDataSource, MockSessionDataSource>();
+            services.AddSingleton<IResumeLauncher, MockResumeLauncher>();
+            services.AddSingleton<IClipboardService, MockClipboardService>();
+            services.AddSingleton<ISessionWatcher, NullSessionWatcher>();
+        }
+        else
+        {
+            // Registered concretely as well: resume launchers need
+            // TryGetProjectCwd to cd into the workspace before resuming.
+            services.AddSingleton<ClaudeSessionDataSource>();
+            services.AddSingleton<ISessionDataSource>(sp =>
+                sp.GetRequiredService<ClaudeSessionDataSource>());
+            services.AddSingleton<ISessionWatcher, ClaudeSessionWatcher>();
+            // IResumeLauncher + IClipboardService are registered by the host.
+        }
+
+        // View-models.
+        services.AddSingleton<DetailsViewModel>();
+        services.AddSingleton<MainViewModel>();
+
+        return services;
+    }
 }

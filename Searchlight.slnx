@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Searchlight/Searchlight.csproj" />
+    <Project Path="src/Searchlight.Avalonia/Searchlight.Avalonia.csproj" />
     <Project Path="src/Searchlight.Core.Tests/Searchlight.Core.Tests.csproj" />
     <Project Path="src/Searchlight.Core/Searchlight.Core.csproj" />
   </Folder>
