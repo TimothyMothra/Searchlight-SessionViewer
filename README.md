@@ -8,12 +8,13 @@ Today it reads **GitHub Copilot** sessions from `~/.copilot/`. The data layer is
 by design — support for other agents (e.g. Claude Code) is a planned extension.
 
 > **This fork** adds both halves of that extension: a **Claude Code** data source reading
-> `~/.claude/projects/`, and a cross-platform **Avalonia** host so the GUI runs on macOS and
-> Linux (resuming via `claude --resume` in the platform terminal). See
-> [macOS / Claude Code](#macos--claude-code-avalonia-host) below.
+> `~/.claude/projects/`, and a cross-platform **Avalonia** host so the GUI runs on Windows,
+> macOS, and Linux. The Avalonia host supports **both agents** — Copilot and Claude Code — in
+> one combined session list, resuming each session with the CLI that owns it. See
+> [Cross-platform](#cross-platform-copilot--claude-code-avalonia-host) below.
 
-> **Status:** feature-complete and running. A WinUI host + a platform-neutral Core library + an
-> xUnit test project (36 tests green).
+> **Status:** feature-complete and running. A WinUI host + a cross-platform Avalonia host + a
+> platform-neutral Core library + an xUnit test project (99 tests green).
 
 ## Screenshot
 
@@ -57,25 +58,34 @@ Requires the **.NET 10 SDK** (pinned via `global.json`) on Windows.
 | No tray | append `--no-tray` | Live `~/.copilot` |
 | Demo / mock | `Demo` build config, or `--demo` flag | Synthetic (15 sessions) |
 
-## macOS / Claude Code (Avalonia host)
+## Cross-platform: Copilot + Claude Code (Avalonia host)
 
-`src/Searchlight.Avalonia` is a cross-platform front-end over the same Core library, backed by
-the **Claude Code** session store instead of Copilot's:
+`src/Searchlight.Avalonia` is a cross-platform front-end (Windows / macOS / Linux) over the
+same Core library, backed by **either or both** session stores:
 
-- Reads `~/.claude/projects/` — the per-project `sessions-index.json` for the cheap bulk list
+- **Auto-detect** — with no flags, the host shows whichever stores exist on disk; when both
+  `~/.claude/projects/` and `~/.copilot/session-state/` are present, the session lists are
+  merged into one view (each row's client badge shows Claude / CLI / App).
+- **Claude Code source** — reads the per-project `sessions-index.json` for the cheap bulk list
   (summary, first prompt, message count, branch, timestamps), merged with any un-indexed
   `<uuid>.jsonl` transcripts on disk. Transcript head-parsing (model, CLI version) is deferred
   until a row is selected, mirroring the Copilot source.
-- **One-click Resume** — `cd <workspace> && claude --resume <id>` in Terminal.app on macOS
-  (`x-terminal-emulator` on Linux, `cmd` on Windows).
-- **Read-only by design** — never writes to `~/.claude`.
+- **One-click Resume** — routed to the CLI that owns the session:
+  `cd <workspace> && claude --resume <id>` for Claude Code, `copilot --resume=<id>` for
+  Copilot — in Terminal.app on macOS, `x-terminal-emulator` on Linux, a new `cmd` window on
+  Windows.
+- **Read-only by design** — never writes to `~/.claude` or `~/.copilot`.
 
 ```bash
 # Run the unit tests (any OS)
 dotnet test src/Searchlight.Core.Tests/Searchlight.Core.Tests.csproj
 
-# Run against your real Claude Code sessions
+# Run against your real sessions (auto-detects Claude Code and/or Copilot)
 dotnet run --project src/Searchlight.Avalonia
+
+# Force a single store
+dotnet run --project src/Searchlight.Avalonia -- --source=claude
+dotnet run --project src/Searchlight.Avalonia -- --source=copilot
 
 # Run against synthetic data
 dotnet run --project src/Searchlight.Avalonia -- --demo

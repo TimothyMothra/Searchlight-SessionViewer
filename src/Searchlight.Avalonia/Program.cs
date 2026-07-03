@@ -6,8 +6,9 @@ namespace Searchlight.Avalonia;
 public static class Program
 {
     /// <summary>
-    /// Starts the app. <c>--demo</c> runs against synthetic sessions instead of
-    /// the live <c>~/.claude</c> store.
+    /// Starts the app. <c>--source=claude|copilot|both</c> picks the session
+    /// store(s); without it the host auto-detects which of <c>~/.claude</c> /
+    /// <c>~/.copilot</c> exist. <c>--demo</c> runs against synthetic sessions.
     /// </summary>
     [STAThread]
     public static void Main(string[] args) =>

@@ -209,6 +209,21 @@ public sealed class ClaudeSessionDataSource : ISessionDataSource
         }
     }
 
+    /// <summary>
+    /// True when the given session id was loaded from the Claude Code store.
+    /// Distinct from <see cref="TryGetProjectCwd"/> returning null, which also
+    /// happens for known sessions whose workspace could not be resolved. Used
+    /// by hosts that show the combined Claude + Copilot list to route a resume
+    /// to the right CLI. Cache-only, like <see cref="TryGetProjectCwd"/>.
+    /// </summary>
+    public bool OwnsSession(string sessionId)
+    {
+        lock (_gate)
+        {
+            return _cwdBySessionId.ContainsKey(sessionId);
+        }
+    }
+
     private void LoadProject(
         string projectDir, List<SessionInfo> sessions, Dictionary<string, string?> cwdMap)
     {
