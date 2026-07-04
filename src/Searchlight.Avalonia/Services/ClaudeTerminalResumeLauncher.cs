@@ -28,12 +28,12 @@ public sealed class ClaudeTerminalResumeLauncher : IResumeLauncher
     }
 
     /// <inheritdoc />
-    public bool Resume(string sessionId, string? tabTitle = null)
+    public string? Resume(string sessionId, string? tabTitle = null)
     {
         if (!ClaudeResumeCommand.IsValidSessionId(sessionId))
         {
             CoreLog.Write($"ClaudeTerminalResumeLauncher: rejected non-GUID session id '{sessionId}'");
-            return false;
+            return null;
         }
 
         string? cwd = _dataSource.TryGetProjectCwd(sessionId);
@@ -49,17 +49,19 @@ public sealed class ClaudeTerminalResumeLauncher : IResumeLauncher
                 ClaudeResumeCommand.TryBuildResumeInvocation(
                     sessionId, skipPermissions, out string resume);
                 return PlatformTerminal.Open(
-                    resume, ClaudeResumeCommand.IsUsableCwd(cwd) ? cwd : null);
+                    resume, ClaudeResumeCommand.IsUsableCwd(cwd) ? cwd : null)
+                    ? resume
+                    : null;
             }
 
             ClaudeResumeCommand.TryBuildPosix(
                 sessionId, cwd, skipPermissions, out string command);
-            return PlatformTerminal.Open(command);
+            return PlatformTerminal.Open(command) ? command : null;
         }
         catch (Exception ex)
         {
             CoreLog.Write($"ClaudeTerminalResumeLauncher: EXCEPTION {ex.Message}");
-            return false;
+            return null;
         }
     }
 }

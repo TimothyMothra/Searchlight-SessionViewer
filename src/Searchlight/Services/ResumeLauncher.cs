@@ -31,18 +31,19 @@ public sealed class ResumeLauncher : IResumeLauncher
     /// <summary>
     /// Opens <c>copilot resume &lt;sessionId&gt;</c> in the shared Windows Terminal
     /// window as a new tab (creating that window on first use), falling back to a new
-    /// <c>cmd.exe</c> window when Windows Terminal is unavailable. Returns <c>true</c>
-    /// if the process was started. A blank id is rejected.
+    /// <c>cmd.exe</c> window when Windows Terminal is unavailable. Returns the launched
+    /// CLI command when the process was started, or <c>null</c> on failure. A blank id
+    /// is rejected.
     /// </summary>
     /// <param name="sessionId">The session UUID to resume.</param>
     /// <param name="tabTitle">
     /// Optional friendly title for the terminal tab. Falls back to the session id.
     /// </param>
-    public bool Resume(string sessionId, string? tabTitle = null)
+    public string? Resume(string sessionId, string? tabTitle = null)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
         {
-            return false;
+            return null;
         }
 
         // ASSUMPTION: `copilot` is on the user's PATH (it is, since sessions are
@@ -64,12 +65,12 @@ public sealed class ResumeLauncher : IResumeLauncher
         string wtArgs = $"{windowArg} new-tab --title \"{title}\" cmd /k {command}";
         if (TryStart("wt.exe", wtArgs))
         {
-            return true;
+            return command;
         }
 
         // Fallback: no Windows Terminal on this machine → a plain new cmd window.
         // (cmd.exe has no tab concept, so the single-window grouping is best-effort.)
-        return TryStart("cmd.exe", $"/k {command}");
+        return TryStart("cmd.exe", $"/k {command}") ? command : null;
     }
 
     /// <summary>

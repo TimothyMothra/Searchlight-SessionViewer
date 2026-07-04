@@ -31,6 +31,12 @@ public sealed class MockSessionDataSource : ISessionDataSource
     public IReadOnlyList<SessionInfo> LoadAll() => _sessions;
 
     /// <inheritdoc />
+    public IReadOnlyList<SessionInfo> LoadCheap() => _sessions;
+
+    /// <inheritdoc />
+    public SessionInfo EnrichOne(SessionInfo session) => session;
+
+    /// <inheritdoc />
     public SessionInfo EnrichWithEvents(SessionInfo session) => session;
 
     /// <inheritdoc />

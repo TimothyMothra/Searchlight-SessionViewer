@@ -17,6 +17,13 @@ public sealed class SessionAggregator
     private readonly SnapshotIndexReader _snapshotReader;
     private readonly JournalReader _journalReader;
 
+    // Lazily-loaded bulk enrichment maps, cached on first EnrichOne call so the
+    // background enrichment pass reads the snapshot index + journal exactly once
+    // rather than per session. Populated together; guarded by _bulkLoaded.
+    private IReadOnlyDictionary<string, SnapshotSummary>? _snapshotCache;
+    private IReadOnlyDictionary<string, JournalEntry>? _journalCache;
+    private bool _bulkLoaded;
+
     /// <summary>Creates an aggregator over the given readers.</summary>
     public SessionAggregator(
         SessionStateScanner scanner,
@@ -54,6 +61,37 @@ public sealed class SessionAggregator
         }
 
         return enriched;
+    }
+
+    /// <summary>
+    /// Fast first pass: placeholder rows for every session folder, newest first,
+    /// with NO <c>workspace.yaml</c> parse, NO presence-flag sub-enumeration, and
+    /// NO bulk snapshot/journal enrichment. Each returned row must be upgraded
+    /// later via <see cref="EnrichOne"/>. Lets the UI publish all rows in a few
+    /// hundred milliseconds instead of ~2 seconds.
+    /// </summary>
+    public IReadOnlyList<SessionInfo> LoadCheap() => _scanner.ScanCheap();
+
+    /// <summary>
+    /// Fully enriches a single cheap placeholder (from <see cref="LoadCheap"/>):
+    /// applies the expensive per-folder facts (<c>workspace.yaml</c> +
+    /// lock/plan/session-db/checkpoint flags) via <see cref="SessionStateScanner.EnrichFolder"/>,
+    /// then merges bulk branch / snapshot-count / journal-activity enrichment.
+    /// The bulk snapshot-index and journal maps are loaded once and cached on
+    /// first call. Events head-parsing is still deferred to
+    /// <see cref="EnrichWithEvents"/>.
+    /// </summary>
+    public SessionInfo EnrichOne(SessionInfo session)
+    {
+        if (!_bulkLoaded)
+        {
+            _snapshotCache = _snapshotReader.LoadSummaries();
+            _journalCache = _journalReader.LoadLatestBySession();
+            _bulkLoaded = true;
+        }
+
+        SessionInfo enriched = _scanner.EnrichFolder(session);
+        return ApplyBulkEnrichment(enriched, _snapshotCache!, _journalCache!);
     }
 
     /// <summary>

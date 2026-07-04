@@ -32,6 +32,12 @@ public sealed class LiveSessionDataSource : ISessionDataSource
     public IReadOnlyList<SessionInfo> LoadAll() => _aggregator.LoadAll();
 
     /// <inheritdoc />
+    public IReadOnlyList<SessionInfo> LoadCheap() => _aggregator.LoadCheap();
+
+    /// <inheritdoc />
+    public SessionInfo EnrichOne(SessionInfo session) => _aggregator.EnrichOne(session);
+
+    /// <inheritdoc />
     public SessionInfo EnrichWithEvents(SessionInfo session) => _aggregator.EnrichWithEvents(session);
 
     /// <inheritdoc />

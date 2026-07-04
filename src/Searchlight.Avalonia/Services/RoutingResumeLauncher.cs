@@ -28,7 +28,7 @@ public sealed class RoutingResumeLauncher : IResumeLauncher
     }
 
     /// <inheritdoc />
-    public bool Resume(string sessionId, string? tabTitle = null) =>
+    public string? Resume(string sessionId, string? tabTitle = null) =>
         _claudeSource.OwnsSession(sessionId)
             ? _claude.Resume(sessionId, tabTitle)
             : _copilot.Resume(sessionId, tabTitle);

@@ -93,6 +93,14 @@ public sealed class CompositeSessionDataSourceTests
 
         public IReadOnlyList<SessionInfo> LoadAll() => Sessions;
 
+        public IReadOnlyList<SessionInfo> LoadCheap() => Sessions;
+
+        public SessionInfo EnrichOne(SessionInfo session)
+        {
+            Calls++;
+            return session;
+        }
+
         public SessionInfo EnrichWithEvents(SessionInfo session)
         {
             Calls++;

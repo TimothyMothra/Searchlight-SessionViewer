@@ -13,9 +13,9 @@ public sealed class MockResumeLauncher : IResumeLauncher
     public string? LastResumedSessionId { get; private set; }
 
     /// <inheritdoc />
-    public bool Resume(string sessionId, string? tabTitle = null)
+    public string? Resume(string sessionId, string? tabTitle = null)
     {
         LastResumedSessionId = sessionId;
-        return true;
+        return $"copilot --resume={sessionId}";
     }
 }

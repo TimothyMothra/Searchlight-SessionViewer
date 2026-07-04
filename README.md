@@ -58,6 +58,37 @@ Requires the **.NET 10 SDK** (pinned via `global.json`) on Windows.
 | No tray | append `--no-tray` | Live `~/.copilot` |
 | Demo / mock | `Demo` build config, or `--demo` flag | Synthetic (15 sessions) |
 
+## Install & launch (no dev tools needed)
+
+To run Searchlight without `dotnet run` — from the Start Menu, a desktop icon, or automatically at
+login — use the installer script. It publishes a **self-contained** build (no .NET runtime required
+on the target) to `%LOCALAPPDATA%\Searchlight\app` and creates shortcuts:
+
+```powershell
+# Install: publish + Start Menu + desktop + run-at-login shortcuts
+pwsh -File tools/install.ps1
+
+# Uninstall: remove all shortcuts and the install folder
+pwsh -File tools/install.ps1 -Action Uninstall
+```
+
+After installing:
+
+- **Launch on demand** — press the **Win** key and type `Searchlight`, or use the desktop icon.
+- **At login** — it starts automatically and sits in the system tray (a **Startup** shortcut is
+  created).
+- **Single instance** — launching again (e.g. clicking the icon while it's already running at
+  login) just surfaces the existing window instead of adding a second tray icon.
+
+Installer switches:
+
+| Switch | Effect |
+|--------|--------|
+| `-NoDesktop` | Skip the desktop shortcut |
+| `-NoStartup` | Skip the run-at-login (Startup) shortcut |
+| `-SkipPublish` | Reuse the last published output (faster re-install) |
+| `-Configuration Debug` | Publish a Debug build instead of Release |
+
 ## Cross-platform: Copilot + Claude Code (Avalonia host)
 
 `src/Searchlight.Avalonia` is a cross-platform front-end (Windows / macOS / Linux) over the

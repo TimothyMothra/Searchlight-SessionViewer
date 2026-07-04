@@ -31,6 +31,24 @@ public sealed class CompositeSessionDataSource : ISessionDataSource
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Each source returns its rows newest-first, but a concatenation of two
+    /// sorted lists isn't sorted — re-sort the merged list to keep the
+    /// interface's newest-first contract.
+    /// </remarks>
+    public IReadOnlyList<SessionInfo> LoadCheap()
+    {
+        var all = new List<SessionInfo>(_claude.LoadCheap());
+        all.AddRange(_copilot.LoadCheap());
+        all.Sort(static (a, b) => b.LastWriteTime.CompareTo(a.LastWriteTime));
+        return all;
+    }
+
+    /// <inheritdoc />
+    public SessionInfo EnrichOne(SessionInfo session) =>
+        Route(session).EnrichOne(session);
+
+    /// <inheritdoc />
     public SessionInfo EnrichWithEvents(SessionInfo session) =>
         Route(session).EnrichWithEvents(session);
 

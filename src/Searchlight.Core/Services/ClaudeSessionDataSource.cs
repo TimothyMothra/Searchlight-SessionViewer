@@ -49,12 +49,46 @@ public sealed class ClaudeSessionDataSource : ISessionDataSource
     /// <remarks>The returned list is ordered newest-first by folder write time.</remarks>
     public IReadOnlyList<SessionInfo> LoadAll()
     {
+        List<SessionInfo> sessions = ScanStore();
+        EagerlyNameRecentSessions(sessions);
+        return sessions;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The Claude bulk pass is already cheap — index entries carry the summary,
+    /// first prompt, and timestamps — so "cheap" here just skips the eager
+    /// transcript head-parsing, deferring it to <see cref="EnrichOne"/>.
+    /// </remarks>
+    public IReadOnlyList<SessionInfo> LoadCheap()
+    {
+        List<SessionInfo> sessions = ScanStore();
+        sessions.Sort(static (a, b) => b.LastWriteTime.CompareTo(a.LastWriteTime));
+        return sessions;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Index-seeded rows are already fully populated; only sessions still missing
+    /// a display name (un-indexed, would render a raw UUID) get their transcript
+    /// head parsed here.
+    /// </remarks>
+    public SessionInfo EnrichOne(SessionInfo session) =>
+        string.IsNullOrWhiteSpace(session.Workspace?.Name) ? EnrichWithEvents(session) : session;
+
+    /// <summary>
+    /// Scans every project folder into fresh session rows and swaps in the
+    /// rebuilt session-id → cwd cache. Shared by <see cref="LoadAll"/> and
+    /// <see cref="LoadCheap"/>.
+    /// </summary>
+    private List<SessionInfo> ScanStore()
+    {
+        var sessions = new List<SessionInfo>();
         if (!Directory.Exists(_projectsRoot))
         {
-            return [];
+            return sessions;
         }
 
-        var sessions = new List<SessionInfo>();
         var cwdMap = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
         foreach (string projectDir in SafeEnumerateDirectories(_projectsRoot))
@@ -66,8 +100,6 @@ public sealed class ClaudeSessionDataSource : ISessionDataSource
         {
             _cwdBySessionId = cwdMap;
         }
-
-        EagerlyNameRecentSessions(sessions);
 
         return sessions;
     }

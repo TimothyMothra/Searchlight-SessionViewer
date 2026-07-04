@@ -45,11 +45,54 @@ public sealed class SessionStateScanner
     }
 
     /// <summary>
+    /// Fast first pass over every session folder, newest first. Reads only cheap
+    /// folder facts (name, id, kind, last-write time) — NO <c>workspace.yaml</c>
+    /// parse and NO per-folder sub-enumeration for presence flags. This lets the UI
+    /// publish placeholder rows for all ~500 folders in a few hundred milliseconds;
+    /// each row is upgraded later via <see cref="EnrichFolder"/>. Missing root yields
+    /// an empty sequence; individual folder failures are skipped rather than fatal.
+    /// </summary>
+    public IReadOnlyList<SessionInfo> ScanCheap()
+    {
+        if (!Directory.Exists(CopilotPaths.SessionState))
+        {
+            return [];
+        }
+
+        var results = new List<SessionInfo>();
+        foreach (string folderPath in Directory.EnumerateDirectories(CopilotPaths.SessionState))
+        {
+            SessionInfo? info = ScanFolderCheap(folderPath);
+            if (info is not null)
+            {
+                results.Add(info);
+            }
+        }
+
+        results.Sort(static (a, b) => b.LastWriteTime.CompareTo(a.LastWriteTime));
+        return results;
+    }
+
+    /// <summary>
     /// Builds a base <see cref="SessionInfo"/> for a single folder, or returns
     /// <c>null</c> if the folder is unreadable. Handles empty/fileless
-    /// <c>optimistic-chat-*</c> folders gracefully.
+    /// <c>optimistic-chat-*</c> folders gracefully. Composes the cheap folder
+    /// scan (<see cref="ScanFolderCheap"/>) with the expensive enrichment
+    /// (<see cref="EnrichFolder"/>).
     /// </summary>
     public SessionInfo? ScanFolder(string folderPath)
+    {
+        SessionInfo? cheap = ScanFolderCheap(folderPath);
+        return cheap is null ? null : EnrichFolder(cheap);
+    }
+
+    /// <summary>
+    /// Cheap per-folder scan: folder name, session id, kind, and last-write time
+    /// only. Skips <c>workspace.yaml</c> and the three presence-flag sub-enumerations
+    /// (lock/plan/checkpoints), so the caller can materialise a placeholder row
+    /// immediately. Returns <c>null</c> if the folder is unreadable.
+    /// </summary>
+    public SessionInfo? ScanFolderCheap(string folderPath)
     {
         try
         {
@@ -60,8 +103,6 @@ public sealed class SessionStateScanner
             var dirInfo = new DirectoryInfo(folderPath);
             DateTimeOffset lastWrite = dirInfo.LastWriteTimeUtc;
 
-            WorkspaceMetadata? workspace = _workspaceReader.Read(folderPath);
-
             return new SessionInfo
             {
                 Id = id,
@@ -69,6 +110,29 @@ public sealed class SessionStateScanner
                 FolderPath = folderPath,
                 Kind = isChat ? SessionKind.Chat : SessionKind.Project,
                 LastWriteTime = lastWrite,
+            };
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Upgrades a cheap placeholder (from <see cref="ScanFolderCheap"/>) with the
+    /// expensive per-folder facts: <c>workspace.yaml</c> metadata plus the
+    /// lock/plan/session-db/checkpoint presence flags. Returns a copy; on failure
+    /// returns the input unchanged so a bad folder never drops the row.
+    /// </summary>
+    public SessionInfo EnrichFolder(SessionInfo session)
+    {
+        try
+        {
+            string folderPath = session.FolderPath;
+            WorkspaceMetadata? workspace = _workspaceReader.Read(folderPath);
+
+            return session with
+            {
                 Workspace = workspace,
                 IsInUse = HasLockFile(folderPath),
                 HasPlan = HasPlanFile(folderPath),
@@ -78,7 +142,7 @@ public sealed class SessionStateScanner
         }
         catch (Exception)
         {
-            return null;
+            return session;
         }
     }
 

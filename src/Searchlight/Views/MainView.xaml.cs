@@ -1,3 +1,4 @@
+using Searchlight.Models;
 using Searchlight.Services;
 using Searchlight.ViewModels;
 using Microsoft.UI.Xaml;
@@ -71,5 +72,57 @@ public sealed partial class MainView : UserControl
         {
             ViewModel.Details.ResumeCommand.Execute(null);
         }
+    }
+
+    /// <summary>
+    /// Clicking a tick in the compact rail scrolls the list straight to that group's
+    /// first session — the rail acts like a jump-to-group second scrollbar.
+    /// </summary>
+    private void OnRailTickClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: SessionGroup group } && group.Count > 0)
+        {
+            SessionList.ScrollIntoView(group[0], ScrollIntoViewAlignment.Leading);
+        }
+    }
+
+    /// <summary>
+    /// Group headers don't forward mouse-wheel input to the list's ScrollViewer on their
+    /// own, so hovering a header and scrolling does nothing. Translate the wheel delta into
+    /// a manual vertical scroll so the wheel keeps working over the group labels.
+    /// </summary>
+    private void OnGroupHeaderPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        ScrollViewer? scrollViewer = FindDescendantScrollViewer(SessionList);
+        if (scrollViewer is null)
+        {
+            return;
+        }
+
+        // Positive wheel delta = wheel up = scroll toward the top (smaller offset).
+        int delta = e.GetCurrentPoint((UIElement)sender).Properties.MouseWheelDelta;
+        scrollViewer.ChangeView(null, scrollViewer.VerticalOffset - delta, null, disableAnimation: false);
+        e.Handled = true;
+    }
+
+    private static ScrollViewer? FindDescendantScrollViewer(DependencyObject root)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer scrollViewer)
+            {
+                return scrollViewer;
+            }
+
+            ScrollViewer? nested = FindDescendantScrollViewer(child);
+            if (nested is not null)
+            {
+                return nested;
+            }
+        }
+
+        return null;
     }
 }

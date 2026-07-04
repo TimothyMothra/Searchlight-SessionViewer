@@ -21,24 +21,24 @@ public sealed class CopilotTerminalResumeLauncher : IResumeLauncher
     public CopilotTerminalResumeLauncher(SettingsService settings) => _settings = settings;
 
     /// <inheritdoc />
-    public bool Resume(string sessionId, string? tabTitle = null)
+    public string? Resume(string sessionId, string? tabTitle = null)
     {
         if (!CopilotResumeCommand.TryBuild(
                 sessionId, _settings.Current.AppendYolo, out string command))
         {
             CoreLog.Write(
                 $"CopilotTerminalResumeLauncher: rejected non-GUID session id '{sessionId}'");
-            return false;
+            return null;
         }
 
         try
         {
-            return PlatformTerminal.Open(command);
+            return PlatformTerminal.Open(command) ? command : null;
         }
         catch (Exception ex)
         {
             CoreLog.Write($"CopilotTerminalResumeLauncher: EXCEPTION {ex.Message}");
-            return false;
+            return null;
         }
     }
 }

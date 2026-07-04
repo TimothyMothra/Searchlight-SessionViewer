@@ -34,6 +34,11 @@ public partial class App : Application
     private TaskbarIcon? _trayIcon;
     private SettingsService? _settingsService;
 
+    // The UI-thread dispatcher, captured in OnLaunched. Used to defer tray-menu
+    // teardown out of the flyout-item click message (disposing the TaskbarIcon
+    // synchronously inside its own Click handler can hang the flyout close).
+    private DispatcherQueue? _uiDispatcher;
+
     // Set only when the user chooses Exit from the tray; distinguishes a real
     // shutdown from a "hide to tray" close so OnWindowClosing can veto the latter.
     private bool _isExiting;
@@ -41,6 +46,19 @@ public partial class App : Application
     // When true (launched with --no-tray), the app runs as a plain window with no
     // system-tray icon and closing the window exits the process.
     private bool _noTray;
+
+    // Single-instance guard (normal tray mode only). The first instance owns this
+    // mutex and listens on a named event; a later normal launch (e.g. the user
+    // clicks the Start Menu / desktop shortcut while the run-at-login instance is
+    // already sitting in the tray) signals the event and exits, so the running
+    // instance surfaces its window instead of a duplicate tray icon appearing.
+    // --no-tray and --demo runs are intentionally exempt so they can coexist with
+    // the normal tray instance (e.g. running Demo for screenshots).
+    private System.Threading.Mutex? _instanceMutex;
+    private System.Threading.EventWaitHandle? _showWindowSignal;
+
+    private const string SingleInstanceMutexName = "Searchlight.SingleInstance.Mutex";
+    private const string ShowWindowEventName = "Searchlight.SingleInstance.ShowWindow";
 
     // ASSUMPTION: temporary diagnostic sink to capture the UI-thread stowed
     // exception (WER shows only 0xc000027b in Microsoft.UI.Xaml.dll). Remove
@@ -96,6 +114,7 @@ public partial class App : Application
         // We are on the UI thread here: capture its dispatcher so the file
         // watcher can marshal incremental list updates back onto it.
         DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
+        _uiDispatcher = dispatcher;
 
         Log("OnLaunched: loading settings");
         var settingsService = new SettingsService();
@@ -129,6 +148,16 @@ public partial class App : Application
         bool useMock = ResolveUseMock();
         Log($"OnLaunched: noTray={_noTray} useMock={useMock}");
 
+        // Single-instance: only the normal tray app participates. If another normal
+        // instance is already running, tell it to show its window and exit this one
+        // (prevents a duplicate tray icon when run-at-login + a shortcut both fire).
+        if (!_noTray && !useMock && !TryAcquireSingleInstance(dispatcher))
+        {
+            Log("OnLaunched: another instance is running -> signalled it and exiting");
+            Exit();
+            return;
+        }
+
         Log("OnLaunched: building service provider");
         _services = BuildServices(settingsService, dispatcher, useMock);
         _viewModel = _services.GetRequiredService<MainViewModel>();
@@ -152,6 +181,24 @@ public partial class App : Application
         // In --no-tray mode there is no tray, so a close exits the process.
         _window.AppWindow.Closing += OnWindowClosing;
 
+        // ScriptTray behavior for minimize too: when the tray exists, minimizing (-)
+        // hides the window to the tray instead of leaving a taskbar button, matching
+        // the close-to-tray behavior. AppWindow.Changed fires only AFTER the window has
+        // already minimized to a taskbar button, so it can't suppress the taskbar
+        // minimize. Instead we subclass the window and intercept WM_SYSCOMMAND /
+        // SC_MINIMIZE before the OS minimizes, and hide to the tray. Skipped in
+        // --no-tray mode (there is nowhere to hide to).
+        if (!_noTray)
+        {
+            MinimizeToTrayHelper.Enable(_window, () =>
+            {
+                if (!_isExiting)
+                {
+                    _window?.AppWindow.Hide();
+                }
+            });
+        }
+
         if (!_noTray)
         {
             InitializeTrayIcon();
@@ -170,20 +217,34 @@ public partial class App : Application
     /// </summary>
     private void InitializeTrayIcon()
     {
-        var openItem = new MenuFlyoutItem { Text = "Open" };
-        openItem.Click += (_, _) => ShowWindow();
-
-        var refreshItem = new MenuFlyoutItem { Text = "Refresh" };
-        refreshItem.Click += (_, _) =>
+        // Use Command (not the Click event) on the tray context-menu items. In an
+        // unpackaged WinUI 3 host the MenuFlyoutItem.Click event on the H.NotifyIcon
+        // TaskbarIcon's flyout does NOT fire reliably (the click body never runs),
+        // which is why the tray Exit previously did nothing. The RelayCommand path is
+        // the same mechanism as LeftClickCommand below, which works reliably.
+        var openItem = new MenuFlyoutItem
         {
-            if (_viewModel?.RefreshCommand.CanExecute(null) == true)
-            {
-                _viewModel.RefreshCommand.Execute(null);
-            }
+            Text = "Open",
+            Command = new RelayCommand(ShowWindow),
         };
 
-        var exitItem = new MenuFlyoutItem { Text = "Exit" };
-        exitItem.Click += (_, _) => ExitApplication();
+        var refreshItem = new MenuFlyoutItem
+        {
+            Text = "Refresh",
+            Command = new RelayCommand(() =>
+            {
+                if (_viewModel?.RefreshCommand.CanExecute(null) == true)
+                {
+                    _viewModel.RefreshCommand.Execute(null);
+                }
+            }),
+        };
+
+        var exitItem = new MenuFlyoutItem
+        {
+            Text = "Exit",
+            Command = new RelayCommand(ExitApplication),
+        };
 
         var menu = new MenuFlyout();
         menu.Items.Add(openItem);
@@ -214,6 +275,67 @@ public partial class App : Application
         };
 
         _trayIcon.ForceCreate();
+    }
+
+    /// <summary>
+    /// Acquires the single-instance guard for normal tray mode. Returns <c>true</c>
+    /// when this is the first instance (and starts a background listener that
+    /// surfaces the window when a later launch signals it). Returns <c>false</c>
+    /// when another instance already owns the guard — in that case it signals the
+    /// running instance to show its window, and the caller should exit.
+    /// </summary>
+    private bool TryAcquireSingleInstance(DispatcherQueue dispatcher)
+    {
+        _instanceMutex = new System.Threading.Mutex(initiallyOwned: true, SingleInstanceMutexName, out bool createdNew);
+
+        if (!createdNew)
+        {
+            // Another normal instance is already running: signal it to show its window.
+            try
+            {
+                if (System.Threading.EventWaitHandle.TryOpenExisting(ShowWindowEventName, out System.Threading.EventWaitHandle? existing))
+                {
+                    existing.Set();
+                    existing.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"TryAcquireSingleInstance: failed to signal running instance: {ex.Message}");
+            }
+
+            _instanceMutex.Dispose();
+            _instanceMutex = null;
+            return false;
+        }
+
+        // First instance: listen for later launches asking us to surface the window.
+        var signal = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, ShowWindowEventName);
+        _showWindowSignal = signal;
+
+        var listener = new System.Threading.Thread(() =>
+        {
+            while (true)
+            {
+                try
+                {
+                    signal.WaitOne();
+                }
+                catch
+                {
+                    return; // handle disposed on exit
+                }
+
+                dispatcher.TryEnqueue(ShowWindow);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Searchlight.ShowWindowListener",
+        };
+        listener.Start();
+
+        return true;
     }
 
     /// <summary>Shows and focuses the main window (from the tray).</summary>
@@ -304,18 +426,33 @@ public partial class App : Application
     /// <summary>Tears down the tray icon and the DI container, then exits.</summary>
     private void ExitApplication()
     {
+        Log("ExitApplication: entered");
         _isExiting = true;
 
-        _trayIcon?.Dispose();
+        // Best-effort graceful teardown. Any single step failing must NOT prevent
+        // the process from terminating, so each is guarded and we fall through to
+        // the hard Environment.Exit below regardless.
+        try { _trayIcon?.Dispose(); } catch (Exception ex) { Log($"ExitApplication: tray dispose failed: {ex.Message}"); }
+
+        // Release the single-instance guard so a future launch can start cleanly.
+        try { _showWindowSignal?.Dispose(); } catch { }
+        try { _instanceMutex?.Dispose(); } catch { }
 
         // Disposing the provider disposes the singletons it owns — MainViewModel and
         // the ISessionWatcher — so we must NOT also dispose them manually (double
         // dispose). The watcher/view-model fields are just cached resolved instances.
-        _services?.Dispose();
+        try { _services?.Dispose(); } catch (Exception ex) { Log($"ExitApplication: services dispose failed: {ex.Message}"); }
 
-        _window?.Close();
+        try { _window?.Close(); } catch { }
 
-        Exit();
+        try { Exit(); } catch { }
+
+        // Guarantee the process actually terminates. For an unpackaged WinUI 3 app,
+        // Application.Exit() alone is unreliable when lingering COM/tray references
+        // keep the message loop alive; a hard exit is safe here because this app is
+        // read-only and holds no unsaved state.
+        Log("ExitApplication: forcing process exit");
+        Environment.Exit(0);
     }
 
     /// <summary>

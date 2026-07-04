@@ -129,14 +129,19 @@
         <!-- Body: list (left) + details (right) -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="380" MinWidth="300" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" MinWidth="360" />
             </Grid.ColumnDefinitions>
 
-            <!-- Session list -->
-            <ListView Grid.Column="0"
+            <!-- Session list. FlowDirection is flipped to RightToLeft so the native
+                 vertical scrollbar renders on the list's LEFT edge (next to the tick
+                 rail, away from the details pane). The item template root and group
+                 header restore LeftToRight so their content still reads normally. -->
+            <ListView Grid.Column="1"
                       x:Name="SessionList"
+                      FlowDirection="RightToLeft"
                       SelectedItem="{x:Bind ViewModel.SelectedSession, Mode=TwoWay}"
                       SelectionMode="Single"
                       DoubleTapped="OnSessionDoubleTapped"
@@ -151,7 +156,7 @@
                 </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="models:SessionInfo">
-                        <Grid ColumnSpacing="8">
+                        <Grid ColumnSpacing="8" FlowDirection="LeftToRight">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
@@ -220,7 +225,9 @@
                     <GroupStyle>
                         <GroupStyle.HeaderTemplate>
                             <DataTemplate x:DataType="models:SessionGroup">
-                                <Border Padding="4,12,4,4">
+                                <Border Padding="4,12,4,4" FlowDirection="LeftToRight"
+                                        Background="Transparent"
+                                        PointerWheelChanged="OnGroupHeaderPointerWheelChanged">
                                     <TextBlock Text="{x:Bind Key}"
                                                FontWeight="SemiBold"
                                                FontSize="12"
@@ -232,12 +239,41 @@
                 </ListView.GroupStyle>
             </ListView>
 
+            <!-- Compact tick rail: an always-visible column of short group labels
+                 that acts like a second scrollbar — clicking a tick jumps the list
+                 straight to that group. Pinned to the far-left edge (col 0). -->
+            <ScrollViewer Grid.Column="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Padding="2,0,2,8"
+                          Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <ItemsControl ItemsSource="{x:Bind ViewModel.SessionGroups, Mode=OneWay}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:SessionGroup">
+                            <Button Click="OnRailTickClick"
+                                    Tag="{x:Bind}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="6,4"
+                                    Margin="0,1"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Center"
+                                    ToolTipService.ToolTip="{x:Bind Key}">
+                                <TextBlock Text="{x:Bind ShortKey}"
+                                           FontSize="11"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
             <!-- Divider -->
-            <Border Grid.Column="1" Width="1"
+            <Border Grid.Column="2" Width="1"
                     Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
             <!-- Details pane -->
-            <Grid Grid.Column="2">
+            <Grid Grid.Column="3">
                 <!-- Empty state -->
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8"
                             Visibility="{x:Bind ViewModel.Details.HasSession, Mode=OneWay, Converter={StaticResource BoolToVis}, ConverterParameter=invert}">
@@ -296,10 +332,6 @@
 
                     <ScrollViewer Grid.Row="1" Padding="20,0,20,16">
                         <StackPanel Spacing="16">
-                            <TextBlock Text="{x:Bind ViewModel.Details.StatusMessage, Mode=OneWay}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   Visibility="{x:Bind ViewModel.Details.StatusMessage, Mode=OneWay, Converter={StaticResource StringToVis}}" />
-
                         <!-- Fields -->
                         <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -417,19 +449,34 @@
             </Grid>
         </Grid>
 
-        <!-- Status bar -->
+        <!-- Status bar: session count (left, mirrors the list pane) + most-recent action (right, full text, right-aligned, selectable) -->
         <Border Grid.Row="3" Padding="16,8"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                 BorderThickness="0,1,0,0">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-                <TextBlock Text="{x:Bind ViewModel.VisibleCount, Mode=OneWay}"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
-                <TextBlock Text="of" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
-                <TextBlock Text="{x:Bind ViewModel.TotalCount, Mode=OneWay}"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
-                <TextBlock Text="sessions" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
-            </StackPanel>
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="{x:Bind ViewModel.VisibleCount, Mode=OneWay}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+                    <TextBlock Text="of" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+                    <TextBlock Text="{x:Bind ViewModel.TotalCount, Mode=OneWay}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+                    <TextBlock Text="sessions" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="1"
+                           Text="{x:Bind ViewModel.Details.LastActionText, Mode=OneWay}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"
+                           TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                           HorizontalAlignment="Right" TextAlignment="Right"
+                           VerticalAlignment="Center" />
+            </Grid>
         </Border>
     </Grid>
 </UserControl>
