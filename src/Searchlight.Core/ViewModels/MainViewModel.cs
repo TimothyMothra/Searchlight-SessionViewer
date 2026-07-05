@@ -83,6 +83,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private int _totalCount;
 
+    /// <summary>
+    /// Live pin state of the currently selected session, driving the Pin/Unpin
+    /// toggle in the details pane. Kept observable (unlike <see cref="SessionInfo.IsPinned"/>,
+    /// a plain record field) so the details button flips immediately on pin/unpin.
+    /// </summary>
+    [ObservableProperty]
+    private bool _selectedIsPinned;
+
     partial void OnSelectedSessionChanged(SessionInfo? value)
     {
         // During a list rebuild the ListView transiently clears its SelectedItem
@@ -93,6 +101,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        SelectedIsPinned = value is not null && _pinnedIds.Contains(value.Id);
         Details.Load(value);
     }
 
@@ -330,6 +339,29 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     // PropertyChanged-driven auto-save fires.
     private void PersistPins() => Settings.Current.PinnedSessionIds = [.. _pinnedIds];
 
+    /// <summary>
+    /// Toggles the pin state of the currently selected session. Backs the single
+    /// Pin/Unpin button in the details pane (the per-row buttons were removed).
+    /// </summary>
+    [RelayCommand]
+    private void TogglePin()
+    {
+        SessionInfo? session = SelectedSession;
+        if (session is null)
+        {
+            return;
+        }
+
+        if (!_pinnedIds.Remove(session.Id))
+        {
+            _pinnedIds.Add(session.Id);
+        }
+
+        PersistPins();
+        SelectedIsPinned = _pinnedIds.Contains(session.Id);
+        ApplyFilter();
+    }
+
     private void HookWatcher()
     {
         if (_watcherHooked)
@@ -388,7 +420,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             List<SessionInfo> pinned = [.. ordered.Where(s => s.IsPinned)];
             if (pinned.Count > 0)
             {
-                SessionGroup pinnedGroup = new("Pinned", "Pin");
+                SessionGroup pinnedGroup = new("Pinned", "Pinned");
                 foreach (SessionInfo session in pinned)
                 {
                     pinnedGroup.Add(session);
@@ -433,6 +465,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         // Reload the details pane exactly once, reflecting the final selection.
+        SelectedIsPinned = SelectedSession is not null && _pinnedIds.Contains(SelectedSession.Id);
         Details.Load(SelectedSession);
     }
 

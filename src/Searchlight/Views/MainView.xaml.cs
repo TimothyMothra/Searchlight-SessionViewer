@@ -94,22 +94,6 @@ public sealed partial class MainView : UserControl
         }
     }
 
-    private void OnPinClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: SessionInfo session })
-        {
-            ViewModel.PinCommand.Execute(session);
-        }
-    }
-
-    private void OnUnpinClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: SessionInfo session })
-        {
-            ViewModel.UnpinCommand.Execute(session);
-        }
-    }
-
     /// <summary>
     /// Group headers don't forward mouse-wheel input to the list's ScrollViewer on their
     /// own, so hovering a header and scrolling does nothing. Translate the wheel delta into
