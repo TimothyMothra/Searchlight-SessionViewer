@@ -53,9 +53,11 @@ public sealed partial class DetailsViewModel : ObservableObject
     /// Full text of the most recent user action (copy or resume), for the persistent
     /// bottom footer. Shows the action name plus the full command/string involved
     /// (e.g. the exact <c>copilot --resume=…</c> command, or the copied GUID).
+    /// Seeded with "Initializing..." so the footer isn't blank during startup; the
+    /// load stopwatch overwrites it with "Loaded N sessions in Xs" once ready.
     /// </summary>
     [ObservableProperty]
-    private string? _lastActionText;
+    private string? _lastActionText = "Initializing...";
 
     /// <summary>
     /// Loads and enriches the given session into the pane. Passing null clears it.

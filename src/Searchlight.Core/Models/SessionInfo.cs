@@ -121,4 +121,12 @@ public sealed record SessionInfo
     /// folder last-write time.
     /// </summary>
     public DateTimeOffset UpdatedAt => Workspace?.UpdatedAt ?? LastWriteTime;
+
+    /// <summary>
+    /// Transient display flag: true when this session is pinned to the top of the
+    /// list. Derived from <c>AppSettings.PinnedSessionIds</c> and set by
+    /// <see cref="ViewModels.MainViewModel"/> during grouping; not persisted on the
+    /// record itself. Mutable so an enriched replacement copy can carry it forward.
+    /// </summary>
+    public bool IsPinned { get; set; }
 }

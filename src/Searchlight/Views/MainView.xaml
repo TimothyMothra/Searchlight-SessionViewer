@@ -6,6 +6,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:conv="using:Searchlight.Converters"
+    xmlns:controls="using:Searchlight.Controls"
     xmlns:models="using:Searchlight.Models"
     mc:Ignorable="d">
 
@@ -186,6 +187,18 @@
                             </StackPanel>
 
                             <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Top">
+                                <!-- Pin/Unpin use a TEXT label (not an icon-only affordance)
+                                     for accessibility: pin glyphs are ambiguous, so a word makes
+                                     the action unmistakable. Exactly one shows per row, toggled by
+                                     IsPinned (invert for the Pin action). -->
+                                <Button Content="Pin"
+                                        FontSize="11" Padding="8,2"
+                                        Click="OnPinClick" Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsPinned, Converter={StaticResource BoolToVis}, ConverterParameter=invert}" />
+                                <Button Content="Unpin"
+                                        FontSize="11" Padding="8,2"
+                                        Click="OnUnpinClick" Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsPinned, Converter={StaticResource BoolToVis}}" />
                                 <Border Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
                                         CornerRadius="4" Padding="6,2"
                                         Visibility="{x:Bind IsInUse, Converter={StaticResource BoolToVis}}">
@@ -475,8 +488,42 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"
                            TextWrapping="Wrap" IsTextSelectionEnabled="True"
                            HorizontalAlignment="Right" TextAlignment="Right"
-                           VerticalAlignment="Center" />
+                           VerticalAlignment="Center" Margin="0,0,16,0" />
             </Grid>
         </Border>
+
+        <!-- Bottom-right resize grip: an oversized transparent grab target (VS Code pixelated-triangle
+             style) declared after the footer Border so it renders on top of the same Row 3 cell. The
+             ResizeGrip control shows the diagonal NWSE resize cursor on hover so the corner clearly
+             reads as grabbable; the 28x28 transparent square makes it easy to hit without pixel-hunting,
+             while the dot triangle stays visually tucked in the corner. The dot Canvas is
+             IsHitTestVisible=False so only the container handles PointerPressed. -->
+        <controls:ResizeGrip Grid.Row="3" x:Name="ResizeGrip"
+              Width="28" Height="28"
+              HorizontalAlignment="Right" VerticalAlignment="Bottom"
+              Background="Transparent"
+              PointerPressed="OnResizeGripPressed"
+              PointerMoved="OnResizeGripMoved"
+              PointerReleased="OnResizeGripReleased"
+              PointerCaptureLost="OnResizeGripCaptureLost"
+              ToolTipService.ToolTip="Drag to resize">
+            <Canvas IsHitTestVisible="False" Width="28" Height="28">
+                <!-- Bottom row (3 dots) -->
+                <Rectangle Canvas.Left="15" Canvas.Top="23" Width="2.5" Height="2.5"
+                           Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Rectangle Canvas.Left="19" Canvas.Top="23" Width="2.5" Height="2.5"
+                           Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Rectangle Canvas.Left="23" Canvas.Top="23" Width="2.5" Height="2.5"
+                           Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                <!-- Middle row (2 dots) -->
+                <Rectangle Canvas.Left="19" Canvas.Top="19" Width="2.5" Height="2.5"
+                           Fill="{ThemeResource TextFillColorTertiaryBrush}" />
+                <Rectangle Canvas.Left="23" Canvas.Top="19" Width="2.5" Height="2.5"
+                           Fill="{ThemeResource TextFillColorTertiaryBrush}" />
+                <!-- Top dot (1) -->
+                <Rectangle Canvas.Left="23" Canvas.Top="15" Width="2.5" Height="2.5"
+                           Fill="{ThemeResource TextFillColorTertiaryBrush}" />
+            </Canvas>
+        </controls:ResizeGrip>
     </Grid>
 </UserControl>

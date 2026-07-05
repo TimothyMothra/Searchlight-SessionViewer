@@ -46,6 +46,10 @@ public sealed partial class MainWindow : Window
         _root = new MainView(viewModel);
         Content = _root;
 
+        // Give the resize-grip its window handle so it can hand off to the native
+        // WM_NCLBUTTONDOWN/HTBOTTOMRIGHT resize loop.
+        _root.WindowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
         // The custom top strip becomes the draggable title-bar region.
         SetTitleBar(_root.TitleBarElement);
 
@@ -58,6 +62,17 @@ public sealed partial class MainWindow : Window
 
         Activated += OnActivated;
         Closed += OnClosed;
+        SizeChanged += OnSizeChangedLog;
+    }
+
+    /// <summary>
+    /// Logs each window size change so a grip-drag session can be reconstructed from
+    /// the temp-file log: the first SizeChanged after a "grip PointerPressed" line is
+    /// the moment the resize actually starts (used to measure the perceived lag).
+    /// </summary>
+    private void OnSizeChangedLog(object sender, WindowSizeChangedEventArgs args)
+    {
+        App.LogVerbose($"resize: SizeChanged -> {args.Size.Width:0}x{args.Size.Height:0}");
     }
 
     private void OnActivated(object sender, WindowActivatedEventArgs args)

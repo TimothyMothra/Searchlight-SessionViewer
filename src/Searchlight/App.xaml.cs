@@ -80,6 +80,24 @@ public partial class App : Application
         }
     }
 
+    // Verbose breadcrumbs (e.g. per-move resize tracing) are noisy and only useful
+    // when actively diagnosing. They stay in the code but are gated behind the
+    // SEARCHLIGHT_VERBOSE=1 environment variable so normal runs keep a clean log.
+    internal static bool VerboseLogging { get; } =
+        string.Equals(
+            System.Environment.GetEnvironmentVariable("SEARCHLIGHT_VERBOSE"),
+            "1",
+            System.StringComparison.Ordinal);
+
+    /// <summary>Logs only when <see cref="VerboseLogging"/> is enabled.</summary>
+    internal static void LogVerbose(string message)
+    {
+        if (VerboseLogging)
+        {
+            Log(message);
+        }
+    }
+
     public App()
     {
         InitializeComponent();

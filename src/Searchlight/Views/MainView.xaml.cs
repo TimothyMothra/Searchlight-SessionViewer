@@ -1,3 +1,4 @@
+using Searchlight.Interop;
 using Searchlight.Models;
 using Searchlight.Services;
 using Searchlight.ViewModels;
@@ -48,6 +49,13 @@ public sealed partial class MainView : UserControl
     /// </summary>
     public bool IsElevated { get; } = ElevationHelper.IsElevated();
 
+    /// <summary>
+    /// The host window's native HWND, injected by <see cref="MainWindow"/> after the content
+    /// is set. Used by the bottom-right resize grip to hand off a native window-resize loop
+    /// (WinUI 3 exposes no managed API to programmatically start an edge/corner resize).
+    /// </summary>
+    public nint WindowHandle { get; set; }
+
     public MainView(MainViewModel viewModel)
     {
         ViewModel = viewModel;
@@ -86,6 +94,22 @@ public sealed partial class MainView : UserControl
         }
     }
 
+    private void OnPinClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: SessionInfo session })
+        {
+            ViewModel.PinCommand.Execute(session);
+        }
+    }
+
+    private void OnUnpinClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: SessionInfo session })
+        {
+            ViewModel.UnpinCommand.Execute(session);
+        }
+    }
+
     /// <summary>
     /// Group headers don't forward mouse-wheel input to the list's ScrollViewer on their
     /// own, so hovering a header and scrolling does nothing. Translate the wheel delta into
@@ -103,6 +127,118 @@ public sealed partial class MainView : UserControl
         int delta = e.GetCurrentPoint((UIElement)sender).Properties.MouseWheelDelta;
         scrollViewer.ChangeView(null, scrollViewer.VerticalOffset - delta, null, disableAnimation: false);
         e.Handled = true;
+    }
+
+    // Manual bottom-right resize state. We drive AppWindow.Resize ourselves from pointer moves
+    // rather than the OS's WM_NCLBUTTONDOWN modal loop, which in this WinUI context lagged ~1.1s
+    // before the first resize and often needed a second click to release the corner.
+    private bool _resizing;
+    private int _resizeStartCursorX;
+    private int _resizeStartCursorY;
+    private int _resizeStartWidth;
+    private int _resizeStartHeight;
+    private Microsoft.UI.Windowing.AppWindow? _resizeAppWindow;
+
+    // Smallest window the grip will resize to (physical pixels). Prevents the user from
+    // collapsing the window into an unusable sliver.
+    private const int MinResizeWidth = 480;
+    private const int MinResizeHeight = 360;
+
+    private Microsoft.UI.Windowing.AppWindow? ResolveAppWindow()
+    {
+        if (_resizeAppWindow is not null)
+        {
+            return _resizeAppWindow;
+        }
+
+        nint hwnd = WindowHandle;
+        if (hwnd == 0)
+        {
+            return null;
+        }
+
+        Microsoft.UI.WindowId id = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+        _resizeAppWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(id);
+        return _resizeAppWindow;
+    }
+
+    /// <summary>
+    /// Bottom-right resize grip: on left-button press, start a manual resize. We capture the
+    /// pointer and record the absolute cursor position and current window size; subsequent
+    /// PointerMoved events translate the cursor delta directly into AppWindow.Resize calls.
+    /// Screen-space physical pixels map 1:1 to AppWindow.Size, so no DPI math is needed.
+    /// </summary>
+    private void OnResizeGripPressed(object sender, PointerRoutedEventArgs e)
+    {
+        // Only the left mouse button initiates a resize; ignore right/middle/pen/touch contacts
+        // that aren't a primary press so the grip doesn't hijack other gestures.
+        if (!e.GetCurrentPoint((UIElement)sender).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        Microsoft.UI.Windowing.AppWindow? appWindow = ResolveAppWindow();
+        if (appWindow is null || !ResizeGripInterop.TryGetCursorPos(out int cx, out int cy))
+        {
+            return;
+        }
+
+        _resizing = true;
+        _resizeStartCursorX = cx;
+        _resizeStartCursorY = cy;
+        _resizeStartWidth = appWindow.Size.Width;
+        _resizeStartHeight = appWindow.Size.Height;
+
+        // Capture the pointer so we keep receiving PointerMoved even when the cursor leaves the
+        // 28x28 grip (which it immediately does as the window grows/shrinks under the corner).
+        ((UIElement)sender).CapturePointer(e.Pointer);
+        e.Handled = true;
+        Searchlight.App.LogVerbose($"resize: grip PointerPressed (first click) start={_resizeStartWidth}x{_resizeStartHeight} cursor={cx},{cy}");
+    }
+
+    /// <summary>
+    /// While the grip owns the pointer, translate the absolute cursor delta into a new window
+    /// size and apply it immediately. Runs on every pointer move for smooth, lag-free resizing.
+    /// </summary>
+    private void OnResizeGripMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_resizing || _resizeAppWindow is null)
+        {
+            return;
+        }
+
+        if (!ResizeGripInterop.TryGetCursorPos(out int cx, out int cy))
+        {
+            return;
+        }
+
+        int newWidth = System.Math.Max(MinResizeWidth, _resizeStartWidth + (cx - _resizeStartCursorX));
+        int newHeight = System.Math.Max(MinResizeHeight, _resizeStartHeight + (cy - _resizeStartCursorY));
+        _resizeAppWindow.Resize(new Windows.Graphics.SizeInt32(newWidth, newHeight));
+        e.Handled = true;
+    }
+
+    private void OnResizeGripReleased(object sender, PointerRoutedEventArgs e)
+    {
+        EndResize(sender, "PointerReleased (button up)");
+        e.Handled = true;
+    }
+
+    private void OnResizeGripCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        EndResize(sender, "PointerCaptureLost");
+    }
+
+    private void EndResize(object sender, string reason)
+    {
+        if (!_resizing)
+        {
+            return;
+        }
+
+        _resizing = false;
+        ((UIElement)sender).ReleasePointerCaptures();
+        Searchlight.App.LogVerbose($"resize: end ({reason})");
     }
 
     private static ScrollViewer? FindDescendantScrollViewer(DependencyObject root)

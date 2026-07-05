@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Searchlight.Models;
@@ -37,4 +38,14 @@ public sealed partial class AppSettings : ObservableObject
     /// </summary>
     [ObservableProperty]
     private bool _appendYolo;
+
+    /// <summary>
+    /// Session UUIDs the user has pinned to the top of the list, newest-pinned
+    /// order preserved. Persisted so pins survive restarts. IMPORTANT: mutate by
+    /// REASSIGNING the property (e.g. <c>PinnedSessionIds = [.. list]</c>) — an
+    /// in-place <see cref="List{T}"/> edit does not raise <c>PropertyChanged</c> and
+    /// so would not trigger the settings auto-save.
+    /// </summary>
+    [ObservableProperty]
+    private List<string> _pinnedSessionIds = [];
 }

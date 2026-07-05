@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Searchlight.Abstractions;
@@ -21,6 +22,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly IUiDispatcher _dispatcher;
 
     private readonly List<SessionInfo> _all = [];
+    private readonly HashSet<string> _pinnedIds = [];
     private bool _watcherHooked;
     private bool _suppressSelectionSideEffects;
 
@@ -44,6 +46,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _dispatcher = dispatcher;
         Details = details;
         Settings = settings;
+
+        // Seed pinned ids from persisted settings so pins survive restarts.
+        foreach (string id in settings.Current.PinnedSessionIds)
+        {
+            _pinnedIds.Add(id);
+        }
     }
 
     /// <summary>The details pane view-model (empty until a row is selected).</summary>
@@ -103,6 +111,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         CoreLog.Write("LoadAsync: start");
         int generation = ++_loadGeneration;
+
+        // Time the whole load through to the end of background enrichment ("fully
+        // loaded"). The elapsed value is written to the footer status once, last-one-wins,
+        // so it shows at startup but is replaced by the next copy/resume action.
+        Stopwatch loadStopwatch = Stopwatch.StartNew();
         IsLoading = true;
         try
         {
@@ -133,7 +146,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // Phase 2: enrich the rest in the background, updating rows in place.
             if (initial.Count > eager)
             {
-                EnrichRemainingInBackground(generation, eager);
+                EnrichRemainingInBackground(generation, eager, loadStopwatch);
+            }
+            else
+            {
+                // No background phase — this load is already "fully loaded".
+                ReportLoadTime(loadStopwatch);
             }
         }
         catch (Exception ex)
@@ -154,7 +172,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// batches so posted row updates render progressively rather than in one burst.
     /// Bails out as soon as a newer load supersedes this <paramref name="generation"/>.
     /// </summary>
-    private void EnrichRemainingInBackground(int generation, int startIndex)
+    private void EnrichRemainingInBackground(int generation, int startIndex, Stopwatch loadStopwatch)
     {
         // Snapshot the pending placeholders on the UI thread before going async.
         List<SessionInfo> pending = [.. _all.Skip(startIndex)];
@@ -200,6 +218,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     {
                         ApplyFilter();
                         CoreLog.Write($"LoadAsync: regrouped after enrichment ({SessionGroups.Count} groups)");
+                        ReportLoadTime(loadStopwatch);
                     }
                 });
             }
@@ -211,6 +230,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Writes the total load time to the footer status once the app is fully loaded
+    /// (all rows enriched and regrouped). Last-one-wins: it shows at startup and is
+    /// overwritten by the next copy/resume action, so it never persists.
+    /// </summary>
+    private void ReportLoadTime(Stopwatch loadStopwatch)
+    {
+        loadStopwatch.Stop();
+        double seconds = loadStopwatch.Elapsed.TotalSeconds;
+        Details.LastActionText = $"Loaded {TotalCount} sessions in {seconds:0.0}s";
+        CoreLog.Write($"LoadAsync: fully loaded in {seconds:0.00}s");
+    }
+
+    /// <summary>
     /// Replaces a placeholder row with its enriched copy in place — both in the
     /// backing list and in its visible group — without re-sorting or regrouping, so
     /// ordering stays stable while off-screen rows fill in. Refreshes the details
@@ -218,6 +250,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private void ReplaceRow(SessionInfo enriched)
     {
+        // Enrichment builds a fresh record; carry the transient pin flag forward so
+        // a pinned row isn't visually dropped from the Pinned group on enrich.
+        enriched.IsPinned = _pinnedIds.Contains(enriched.Id);
+
         for (int i = 0; i < _all.Count; i++)
         {
             if (_all[i].Id == enriched.Id)
@@ -264,6 +300,36 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private Task RefreshAsync() => LoadAsync();
 
+    /// <summary>Pins a session to the top of the list and persists the pin.</summary>
+    [RelayCommand]
+    private void Pin(SessionInfo? session)
+    {
+        if (session is null || !_pinnedIds.Add(session.Id))
+        {
+            return;
+        }
+
+        PersistPins();
+        ApplyFilter();
+    }
+
+    /// <summary>Removes a session's pin and persists the change.</summary>
+    [RelayCommand]
+    private void Unpin(SessionInfo? session)
+    {
+        if (session is null || !_pinnedIds.Remove(session.Id))
+        {
+            return;
+        }
+
+        PersistPins();
+        ApplyFilter();
+    }
+
+    // Reassign the settings list (never mutate in place) so SettingsService's
+    // PropertyChanged-driven auto-save fires.
+    private void PersistPins() => Settings.Current.PinnedSessionIds = [.. _pinnedIds];
+
     private void HookWatcher()
     {
         if (_watcherHooked)
@@ -302,6 +368,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // workspace updated_at diverges from the folder last-write sort key.
         List<SessionInfo> ordered = [.. filtered.OrderByDescending(s => s.UpdatedAt)];
 
+        // Recompute the transient pin flag from the authoritative id set every pass.
+        foreach (SessionInfo session in ordered)
+        {
+            session.IsPinned = _pinnedIds.Contains(session.Id);
+        }
+
         string? keepId = SelectedSession?.Id;
 
         // Suppress the details-pane reload while the ListView churns its
@@ -311,12 +383,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             SessionGroups.Clear();
 
+            // Pinned sessions float to the top in their own group (newest-first),
+            // and are excluded from the recency buckets below so they appear once.
+            List<SessionInfo> pinned = [.. ordered.Where(s => s.IsPinned)];
+            if (pinned.Count > 0)
+            {
+                SessionGroup pinnedGroup = new("Pinned", "Pin");
+                foreach (SessionInfo session in pinned)
+                {
+                    pinnedGroup.Add(session);
+                }
+
+                SessionGroups.Add(pinnedGroup);
+            }
+
             DateTimeOffset now = DateTimeOffset.Now;
             SessionGroup? current = null;
             string? currentKey = null;
 
             foreach (SessionInfo session in ordered)
             {
+                if (session.IsPinned)
+                {
+                    continue;
+                }
+
                 (string key, string shortKey) = GroupLabelsFor(session.UpdatedAt, now);
                 if (current is null || !string.Equals(key, currentKey, StringComparison.Ordinal))
                 {
