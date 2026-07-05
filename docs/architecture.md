@@ -91,13 +91,18 @@ ServiceCollection
 
 `AddCopilotCore(useMock)`:
 
-- Registers the stateless readers, `SessionAggregator`, and `SettingsService` (via `TryAdd`, so the
-  host's pre-built instance wins).
+- Registers `SettingsService` (via `TryAdd`, so the host's pre-built instance wins), and — in live
+  mode — the stateless readers plus `SessionAggregator`.
 - **`useMock == false` (live):** `ISessionDataSource → LiveSessionDataSource`. The host supplies
   `IResumeLauncher` + `ISessionWatcher`.
 - **`useMock == true` (mock):** `ISessionDataSource → MockSessionDataSource`, plus inert
   `MockResumeLauncher` and `NullSessionWatcher` — so a mock host only needs to add `IUiDispatcher`.
 - Registers `DetailsViewModel` and `MainViewModel` (singletons).
+
+Two sibling entry points serve the cross-platform Avalonia host: `AddClaudeCore(useMock)` (the
+Claude Code store, `~/.claude/projects`) and `AddCombinedCore(useMock)` (both stores merged through
+`CompositeSessionDataSource` + `CompositeSessionWatcher`). All three share the same mock mode and
+view-model registrations.
 
 **Why `SettingsService` is pre-built:** the host needs it *before* the container exists, to run the
 startup elevation pre-check. `TryAddSingleton` lets Core register the same shared instance.

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Cross-platform (macOS/Linux/Windows) Avalonia front-end over Searchlight.Core,
+       showing Claude Code sessions from ~/.claude/projects. The WinUI exe remains the
+       Windows-native Copilot host; this host exists so the app runs where WinUI can't. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Searchlight.Avalonia</RootNamespace>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.2" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <!-- NU1903 (GHSA-xrw6-gwf8-vvr9): Avalonia.X11 pulls Tmds.DBus.Protocol 0.21.2;
+         pin the patched release. -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Searchlight.Core\Searchlight.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Window/tray icons, shared with the WinUI host's Assets. -->
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+</Project>

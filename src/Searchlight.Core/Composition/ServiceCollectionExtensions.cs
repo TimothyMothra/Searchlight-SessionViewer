@@ -26,7 +26,93 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddCopilotCore(this IServiceCollection services, bool useMock)
     {
-        // Read-only source readers (stateless singletons).
+        services.TryAddSingleton<SettingsService>();
+
+        if (useMock)
+        {
+            services.AddMockPlatform();
+        }
+        else
+        {
+            services.AddCopilotReaders();
+            services.AddSingleton<ISessionDataSource, LiveSessionDataSource>();
+            // IResumeLauncher + ISessionWatcher are registered by the Windows host.
+        }
+
+        return services.AddViewModels();
+    }
+
+    /// <summary>
+    /// Registers the core services and view-models backed by the Claude Code
+    /// session store (<c>~/.claude/projects</c>) instead of Copilot's
+    /// <c>~/.copilot</c>. When <paramref name="useMock"/> is <c>true</c>, the
+    /// synthetic <see cref="MockSessionDataSource"/> is used and inert platform
+    /// services are supplied, so the host only needs to add a
+    /// <see cref="IUiDispatcher"/>. In live mode the host must register an
+    /// <see cref="IResumeLauncher"/> and <see cref="IClipboardService"/>; a
+    /// <see cref="ClaudeSessionWatcher"/> is registered here since it has no
+    /// platform dependencies.
+    /// </summary>
+    public static IServiceCollection AddClaudeCore(this IServiceCollection services, bool useMock)
+    {
+        services.TryAddSingleton<SettingsService>();
+
+        if (useMock)
+        {
+            services.AddMockPlatform();
+        }
+        else
+        {
+            services.AddClaudeReaders();
+            services.AddSingleton<ISessionDataSource>(sp =>
+                sp.GetRequiredService<ClaudeSessionDataSource>());
+            services.AddSingleton<ISessionWatcher, ClaudeSessionWatcher>();
+            // IResumeLauncher + IClipboardService are registered by the host.
+        }
+
+        return services.AddViewModels();
+    }
+
+    /// <summary>
+    /// Registers the core services and view-models over the combined Claude Code
+    /// + Copilot stores: <see cref="CompositeSessionDataSource"/> merges both
+    /// session lists and <see cref="CompositeSessionWatcher"/> watches both
+    /// roots. When <paramref name="useMock"/> is <c>true</c>, this is identical
+    /// to the other cores' mock mode. In live mode the host must register an
+    /// <see cref="IResumeLauncher"/> that routes per session (e.g. via
+    /// <see cref="ClaudeSessionDataSource.OwnsSession"/>) and an
+    /// <see cref="IClipboardService"/>.
+    /// </summary>
+    public static IServiceCollection AddCombinedCore(this IServiceCollection services, bool useMock)
+    {
+        services.TryAddSingleton<SettingsService>();
+
+        if (useMock)
+        {
+            services.AddMockPlatform();
+        }
+        else
+        {
+            services.AddCopilotReaders();
+            services.AddClaudeReaders();
+
+            services.AddSingleton<LiveSessionDataSource>();
+            services.AddSingleton<ISessionDataSource>(sp => new CompositeSessionDataSource(
+                sp.GetRequiredService<ClaudeSessionDataSource>(),
+                sp.GetRequiredService<LiveSessionDataSource>()));
+
+            services.AddSingleton<ISessionWatcher>(_ => new CompositeSessionWatcher(
+                new ClaudeSessionWatcher(),
+                new SessionWatcher()));
+            // IResumeLauncher + IClipboardService are registered by the host.
+        }
+
+        return services.AddViewModels();
+    }
+
+    /// <summary>Read-only readers for the Copilot store (stateless singletons).</summary>
+    private static IServiceCollection AddCopilotReaders(this IServiceCollection services)
+    {
         services.AddSingleton<WorkspaceYamlReader>();
         services.AddSingleton<SessionStateScanner>();
         services.AddSingleton<EventsJsonlReader>();
@@ -35,31 +121,40 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CheckpointsReader>();
         services.AddSingleton<SessionDbReader>();
         services.AddSingleton<SessionAggregator>();
+        return services;
+    }
 
-        // Settings persistence (observable, JSON-backed). TryAdd so a host that
-        // pre-builds a SettingsService (e.g. the tray exe needs one before the
-        // container exists, for the startup elevation check) can register that same
-        // instance and have it shared across the graph.
-        services.TryAddSingleton<SettingsService>();
+    /// <summary>
+    /// Read-only readers + data source for the Claude Code store. The data
+    /// source is registered concretely as well: resume launchers need
+    /// <see cref="ClaudeSessionDataSource.TryGetProjectCwd"/> /
+    /// <see cref="ClaudeSessionDataSource.OwnsSession"/>.
+    /// </summary>
+    private static IServiceCollection AddClaudeReaders(this IServiceCollection services)
+    {
+        services.AddSingleton<ClaudeSessionIndexReader>();
+        services.AddSingleton<ClaudeJsonlHeadReader>();
+        services.AddSingleton<ClaudeSessionDataSource>();
+        return services;
+    }
 
-        if (useMock)
-        {
-            services.AddSingleton<ISessionDataSource, MockSessionDataSource>();
-            // Inert platform services so a mock host needs only a dispatcher.
-            services.AddSingleton<IResumeLauncher, MockResumeLauncher>();
-            services.AddSingleton<IClipboardService, MockClipboardService>();
-            services.AddSingleton<ISessionWatcher, NullSessionWatcher>();
-        }
-        else
-        {
-            services.AddSingleton<ISessionDataSource, LiveSessionDataSource>();
-            // IResumeLauncher + ISessionWatcher are registered by the Windows host.
-        }
+    /// <summary>
+    /// Mock mode: the synthetic data source plus inert platform services, so a
+    /// mock host needs only a dispatcher.
+    /// </summary>
+    private static IServiceCollection AddMockPlatform(this IServiceCollection services)
+    {
+        services.AddSingleton<ISessionDataSource, MockSessionDataSource>();
+        services.AddSingleton<IResumeLauncher, MockResumeLauncher>();
+        services.AddSingleton<IClipboardService, MockClipboardService>();
+        services.AddSingleton<ISessionWatcher, NullSessionWatcher>();
+        return services;
+    }
 
-        // View-models.
+    private static IServiceCollection AddViewModels(this IServiceCollection services)
+    {
         services.AddSingleton<DetailsViewModel>();
         services.AddSingleton<MainViewModel>();
-
         return services;
     }
 }
