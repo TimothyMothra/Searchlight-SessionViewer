@@ -134,6 +134,8 @@
                 <ColumnDefinition Width="380" MinWidth="300" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" MinWidth="360" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <!-- Session list. FlowDirection is flipped to RightToLeft so the native
@@ -187,6 +189,18 @@
                             </StackPanel>
 
                             <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Top">
+                                <!-- Note-presence badge: outlined shape + glyph + "Notes" text
+                                     (distinguished by shape, not color) so the row shows at a
+                                     glance that it carries a saved note. -->
+                                <Border Background="Transparent" BorderThickness="1"
+                                        BorderBrush="{ThemeResource TextFillColorSecondaryBrush}"
+                                        CornerRadius="4" Padding="6,2"
+                                        Visibility="{x:Bind HasNote, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE70B;" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="Notes" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                </Border>
                                 <Border Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
                                         CornerRadius="4" Padding="6,2"
                                         Visibility="{x:Bind IsInUse, Converter={StaticResource BoolToVis}}">
@@ -319,9 +333,33 @@
                                     <FontIcon Glyph="&#xE8C8;" FontSize="12" />
                                 </Button>
                             </StackPanel>
+                            <!-- Note-presence badge: text label (not icon-only) so it reads
+                                 clearly. Shown when the selected session has a saved note. -->
+                            <Border Background="Transparent" BorderThickness="1"
+                                    BorderBrush="{ThemeResource TextFillColorSecondaryBrush}"
+                                    CornerRadius="4" Padding="6,2" Margin="0,2,0,0"
+                                    HorizontalAlignment="Left"
+                                    Visibility="{x:Bind ViewModel.SelectedHasNote, Mode=OneWay, Converter={StaticResource BoolToVis}}">
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE70B;" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="Has notes" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
                                     VerticalAlignment="Top">
+                                        <!-- Notes toggle: shows/hides the optional Notes pane. Text
+                                             label (not icon-only) per the accessibility-first rule;
+                                             the label reads "Show notes" / "Hide notes" to match state. -->
+                                        <Button Command="{x:Bind ViewModel.ToggleNotesPaneCommand}"
+                                                VerticalAlignment="Stretch"
+                                                AutomationProperties.Name="Toggle notes pane"
+                                                ToolTipService.ToolTip="Show or hide the notes pane">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon Glyph="&#xE70B;" FontSize="14" />
+                                                <TextBlock Text="{x:Bind ViewModel.NotesPaneToggleLabel, Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Button>
                                         <!-- Rename uses a TEXT label (accessibility: no icon-only
                                              affordance). Opens a small flyout with a text box editing
                                              the effective title; empty input reverts to the default. -->
@@ -500,6 +538,43 @@
                     </StackPanel>
                     </ScrollViewer>
                 </Grid>
+            </Grid>
+
+            <!-- Divider before the optional Notes pane (collapses with the pane). -->
+            <Border Grid.Column="4" Width="1"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind ViewModel.IsNotesPaneVisible, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
+
+            <!-- Optional Notes pane: free-form, unformatted per-session notes,
+                 autosaved to a sidecar file. Its Auto column shrinks to zero width
+                 when the pane is hidden (the content collapses). A plain multiline
+                 TextBox with a real "Notes" heading and AutomationProperties.Name —
+                 no icon-only affordance — per the accessibility-first design. -->
+            <Grid Grid.Column="5" Width="320"
+                  Visibility="{x:Bind ViewModel.IsNotesPaneVisible, Mode=OneWay, Converter={StaticResource BoolToVis}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Spacing="2" Padding="16,16,16,8">
+                    <TextBlock Text="Notes" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock Text="Saved automatically for this session."
+                               FontSize="12" TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+
+                <TextBox Grid.Row="1" Margin="16,0,16,16"
+                         Text="{x:Bind ViewModel.SelectedNotes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{x:Bind ViewModel.Details.HasSession, Mode=OneWay}"
+                         PlaceholderText="Write notes about this session…"
+                         AcceptsReturn="True" TextWrapping="Wrap"
+                         FontFamily="Consolas"
+                         VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                         VerticalContentAlignment="Top"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         AutomationProperties.Name="Session notes" />
             </Grid>
         </Grid>
 

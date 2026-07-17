@@ -148,4 +148,13 @@ public sealed record SessionInfo
     /// <c>with</c> copy) so an enriched replacement retains the rename.
     /// </summary>
     public string? CustomName { get; set; }
+
+    /// <summary>
+    /// Transient display flag: true when a non-empty per-session note exists for
+    /// this session. Derived from <c>NotesService</c> and set by
+    /// <see cref="ViewModels.MainViewModel"/> during grouping/enrichment; not
+    /// persisted on the record itself. Mutable so an enriched replacement copy and
+    /// live note edits can update the list's note-presence badge.
+    /// </summary>
+    public bool HasNote { get; set; }
 }

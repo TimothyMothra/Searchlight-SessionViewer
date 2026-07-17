@@ -21,10 +21,10 @@ public sealed class MainViewModelPinTests
         var resume = new MockResumeLauncher();
         var watcher = new NullSessionWatcher();
         var details = new DetailsViewModel(dataSource, resume, new MockClipboardService());
-        var settings = new SettingsService();
+        var settings = new SettingsService(path: null);
         var dispatcher = new InlineUiDispatcher();
 
-        return (new MainViewModel(dataSource, watcher, details, settings, dispatcher), settings);
+        return (new MainViewModel(dataSource, watcher, details, settings, new NotesService(dir: null), dispatcher), settings);
     }
 
     private static SessionInfo FirstRow(MainViewModel vm) =>

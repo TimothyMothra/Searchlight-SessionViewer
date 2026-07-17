@@ -41,6 +41,7 @@ public static class ServiceCollectionExtensions
         // container exists, for the startup elevation check) can register that same
         // instance and have it shared across the graph.
         services.TryAddSingleton<SettingsService>();
+        services.TryAddSingleton<NotesService>();
 
         if (useMock)
         {

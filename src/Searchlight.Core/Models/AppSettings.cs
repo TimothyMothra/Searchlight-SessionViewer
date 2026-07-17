@@ -59,4 +59,12 @@ public sealed partial class AppSettings : ObservableObject
     /// </summary>
     [ObservableProperty]
     private Dictionary<string, string> _customSessionNames = [];
+
+    /// <summary>
+    /// Whether the optional Notes pane (right of the details pane) is shown.
+    /// Persisted so the pane's open/closed state survives restarts. Default false
+    /// (hidden) so the window opens compact.
+    /// </summary>
+    [ObservableProperty]
+    private bool _notesPaneVisible;
 }

@@ -18,10 +18,10 @@ public sealed class MainViewModelGroupingTests
         var resume = new MockResumeLauncher();
         var watcher = new NullSessionWatcher();
         var details = new DetailsViewModel(dataSource, resume, new MockClipboardService());
-        var settings = new SettingsService();
+        var settings = new SettingsService(path: null);
         var dispatcher = new InlineUiDispatcher();
 
-        return new MainViewModel(dataSource, watcher, details, settings, dispatcher);
+        return new MainViewModel(dataSource, watcher, details, settings, new NotesService(dir: null), dispatcher);
     }
 
     [Fact]

@@ -27,6 +27,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _watcherHooked;
     private bool _suppressSelectionSideEffects;
 
+    // Notes state. _notesSessionId is the id whose note is currently loaded into
+    // SelectedNotes; _suppressNotesSave gates the autosave while we load a note
+    // into the bound property; _notesDirty tracks unsaved edits so a selection
+    // change can flush them; _notesDebounceCts coalesces rapid keystrokes into a
+    // single delayed write.
+    private readonly NotesService _notes;
+    private string? _notesSessionId;
+    private bool _suppressNotesSave;
+    private bool _notesDirty;
+    private CancellationTokenSource? _notesDebounceCts;
+
     // Fixed "visible + buffer" window enriched synchronously before the first paint.
     // A generous proxy for the on-screen rows (not viewport-measured); the rest fill
     // in asynchronously. Monotonic generation cancels stale background enrichment when
@@ -40,13 +51,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ISessionWatcher watcher,
         DetailsViewModel details,
         SettingsService settings,
+        NotesService notes,
         IUiDispatcher dispatcher)
     {
         _dataSource = dataSource;
         _watcher = watcher;
         _dispatcher = dispatcher;
+        _notes = notes;
         Details = details;
         Settings = settings;
+
+        // Seed the Notes-pane visibility straight into the backing field so
+        // construction doesn't trigger a redundant settings save.
+        _isNotesPaneVisible = settings.Current.NotesPaneVisible;
 
         // Seed pinned ids from persisted settings so pins survive restarts.
         foreach (string id in settings.Current.PinnedSessionIds)
@@ -112,6 +129,67 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _renameDraft = string.Empty;
 
+    /// <summary>
+    /// Free-form note text for the currently selected session, bound two-way to the
+    /// Notes pane's multiline text box. Autosaved (debounced) to a per-session
+    /// sidecar file via <see cref="NotesService"/>; empty when no row is selected.
+    /// </summary>
+    [ObservableProperty]
+    private string _selectedNotes = string.Empty;
+
+    /// <summary>
+    /// True when the selected session currently has a (non-empty) note, driving the
+    /// note-presence indicator in the details-pane header. Kept live so the badge
+    /// appears/disappears the moment the note becomes non-empty/empty.
+    /// </summary>
+    [ObservableProperty]
+    private bool _selectedHasNote;
+
+    /// <summary>
+    /// Whether the optional Notes pane is shown. Two-way from the toggle in the
+    /// details-pane header; persisted to <c>AppSettings.NotesPaneVisible</c> so the
+    /// open/closed state survives restarts.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NotesPaneToggleLabel))]
+    private bool _isNotesPaneVisible;
+
+    /// <summary>Label for the header toggle: "Hide notes" when open, else "Show notes".</summary>
+    public string NotesPaneToggleLabel => IsNotesPaneVisible ? "Hide notes" : "Show notes";
+
+    partial void OnIsNotesPaneVisibleChanged(bool value) =>
+        Settings.Current.NotesPaneVisible = value;
+
+    /// <summary>Shows or hides the Notes pane. Backs the header toggle button.</summary>
+    [RelayCommand]
+    private void ToggleNotesPane() => IsNotesPaneVisible = !IsNotesPaneVisible;
+
+    partial void OnSelectedNotesChanged(string value)
+    {
+        // Ignore the programmatic assignment we make while loading a session's note
+        // into the bound property (see ReconcileNotesSelection); only real user
+        // edits should mark the note dirty and schedule a save.
+        if (_suppressNotesSave || _notesSessionId is null)
+        {
+            return;
+        }
+
+        _notesDirty = true;
+        ScheduleNotesSave(_notesSessionId, value);
+
+        // Drive the presence indicators from the live text. The details-pane badge
+        // (SelectedHasNote) flips immediately; the left-pane row badge only needs a
+        // refresh when the note crosses the empty <-> non-empty boundary, so gate
+        // the (heavier) regroup on that transition rather than every keystroke.
+        bool hasNow = !string.IsNullOrWhiteSpace(value);
+        SelectedHasNote = hasNow;
+        if (SelectedSession is not null && SelectedSession.HasNote != hasNow)
+        {
+            SelectedSession.HasNote = hasNow;
+            ApplyFilter();
+        }
+    }
+
     partial void OnSelectedSessionChanged(SessionInfo? value)
     {
         // During a list rebuild the ListView transiently clears its SelectedItem
@@ -125,6 +203,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SelectedIsPinned = value is not null && _pinnedIds.Contains(value.Id);
         SelectedHasCustomName = value is not null && _customNames.ContainsKey(value.Id);
         RenameDraft = value?.DisplayName ?? string.Empty;
+        ReconcileNotesSelection();
         Details.Load(value);
     }
 
@@ -474,12 +553,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // workspace updated_at diverges from the folder last-write sort key.
         List<SessionInfo> ordered = [.. filtered.OrderByDescending(s => s.UpdatedAt)];
 
-        // Recompute the transient pin flag and custom name from the authoritative
-        // stores every pass so grouping and DisplayName stay in sync.
+        // Recompute the transient pin flag, custom name, and note-presence flag from
+        // the authoritative stores every pass so grouping, DisplayName, and the
+        // notes badge stay in sync. For the currently-loaded session use the live
+        // editor text (the disk write is debounced and may lag); others read disk.
         foreach (SessionInfo session in ordered)
         {
             session.IsPinned = _pinnedIds.Contains(session.Id);
             session.CustomName = _customNames.GetValueOrDefault(session.Id);
+            session.HasNote = string.Equals(session.Id, _notesSessionId, StringComparison.Ordinal)
+                ? !string.IsNullOrWhiteSpace(SelectedNotes)
+                : _notes.HasNote(session.Id);
         }
 
         string? keepId = SelectedSession?.Id;
@@ -544,7 +628,75 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SelectedIsPinned = SelectedSession is not null && _pinnedIds.Contains(SelectedSession.Id);
         SelectedHasCustomName = SelectedSession is not null && _customNames.ContainsKey(SelectedSession.Id);
         RenameDraft = SelectedSession?.DisplayName ?? string.Empty;
+        ReconcileNotesSelection();
         Details.Load(SelectedSession);
+    }
+
+    // Loads the note for the current selection into SelectedNotes, first flushing
+    // any pending edits for the previously-selected session. A no-op when the
+    // effective selected id is unchanged (e.g. a refresh that preserves selection),
+    // so in-flight edits and the debounce timer are left intact.
+    private void ReconcileNotesSelection()
+    {
+        string? newId = SelectedSession?.Id;
+        if (string.Equals(newId, _notesSessionId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        FlushPendingNotes();
+
+        _notesSessionId = newId;
+        _suppressNotesSave = true;
+        SelectedNotes = newId is null ? string.Empty : _notes.Read(newId);
+        _suppressNotesSave = false;
+        _notesDirty = false;
+        SelectedHasNote = !string.IsNullOrWhiteSpace(SelectedNotes);
+    }
+
+    // Cancels any pending debounce and schedules a delayed write so rapid typing
+    // coalesces into a single save (the note for the still-current session).
+    private void ScheduleNotesSave(string sessionId, string text)
+    {
+        _notesDebounceCts?.Cancel();
+        CancellationTokenSource cts = new();
+        _notesDebounceCts = cts;
+
+        _ = SaveNotesAfterDelayAsync(sessionId, text, cts.Token);
+    }
+
+    private async Task SaveNotesAfterDelayAsync(string sessionId, string text, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(600, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // Superseded by a newer keystroke or a flush.
+        }
+
+        if (ct.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _notes.Write(sessionId, text);
+        _notesDirty = false;
+    }
+
+    // Immediately persists the current note if it has unsaved edits, cancelling any
+    // pending debounce. Called on selection change and dispose so no edit is lost.
+    private void FlushPendingNotes()
+    {
+        _notesDebounceCts?.Cancel();
+        _notesDebounceCts = null;
+
+        if (_notesSessionId is not null && _notesDirty)
+        {
+            _notes.Write(_notesSessionId, SelectedNotes);
+            _notesDirty = false;
+        }
     }
 
     /// <summary>
@@ -660,6 +812,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Detaches the watcher event.</summary>
     public void Dispose()
     {
+        // Persist any unsaved note before teardown.
+        FlushPendingNotes();
+
         if (_watcherHooked)
         {
             _watcher.Changed -= OnWatcherChanged;
