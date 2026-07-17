@@ -48,4 +48,15 @@ public sealed partial class AppSettings : ObservableObject
     /// </summary>
     [ObservableProperty]
     private List<string> _pinnedSessionIds = [];
+
+    /// <summary>
+    /// Per-session manual display-name overrides, keyed by session UUID. A session
+    /// with an entry here shows the custom name instead of its auto-generated
+    /// workspace name (or UUID). Persisted so renames survive restarts. IMPORTANT:
+    /// mutate by REASSIGNING the property (e.g. <c>CustomSessionNames = new(dict)</c>) —
+    /// an in-place <see cref="Dictionary{TKey, TValue}"/> edit does not raise
+    /// <c>PropertyChanged</c> and so would not trigger the settings auto-save.
+    /// </summary>
+    [ObservableProperty]
+    private Dictionary<string, string> _customSessionNames = [];
 }

@@ -62,12 +62,21 @@ public sealed record SessionInfo
     // --- convenience projections ---
 
     /// <summary>
-    /// Best display name: the workspace name if set, else the full UUID.
+    /// Best display name: a user-supplied custom name if set, else the workspace
+    /// name, else the full UUID.
     /// </summary>
-    public string DisplayName =>
-        !string.IsNullOrWhiteSpace(Workspace?.Name)
-            ? Workspace!.Name!
-            : Id;
+    public string DisplayName
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(CustomName))
+            {
+                return CustomName!;
+            }
+
+            return !string.IsNullOrWhiteSpace(Workspace?.Name) ? Workspace!.Name! : Id;
+        }
+    }
 
     /// <summary>First 8 characters of the UUID, for compact display.</summary>
     public string ShortId => Id.Length >= 8 ? Id[..8] : Id;
@@ -129,4 +138,14 @@ public sealed record SessionInfo
     /// record itself. Mutable so an enriched replacement copy can carry it forward.
     /// </summary>
     public bool IsPinned { get; set; }
+
+    /// <summary>
+    /// Transient display override: a user-supplied custom name that takes
+    /// precedence over the workspace name/UUID in <see cref="DisplayName"/>.
+    /// Derived from <c>AppSettings.CustomSessionNames</c> and set by
+    /// <see cref="ViewModels.MainViewModel"/> during grouping/enrichment; not
+    /// persisted on the record itself. Mutable (and carried forward through a
+    /// <c>with</c> copy) so an enriched replacement retains the rename.
+    /// </summary>
+    public string? CustomName { get; set; }
 }

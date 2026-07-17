@@ -94,6 +94,20 @@ public sealed partial class MainView : UserControl
         }
     }
 
+    // Command-bound buttons inside a Flyout don't auto-close it, so the rename actions
+    // are wired as Click handlers that run the command then dismiss the flyout.
+    private void OnRenameSaveClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.RenameCommand.Execute(null);
+        RenameFlyout.Hide();
+    }
+
+    private void OnRenameResetClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.ResetNameCommand.Execute(null);
+        RenameFlyout.Hide();
+    }
+
     /// <summary>
     /// Group headers don't forward mouse-wheel input to the list's ScrollViewer on their
     /// own, so hovering a header and scrolling does nothing. Translate the wheel delta into

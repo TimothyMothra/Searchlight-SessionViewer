@@ -322,7 +322,38 @@
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
                                     VerticalAlignment="Top">
-                            <!-- Pin/Unpin use a TEXT label (not an icon-only affordance) for
+                                        <!-- Rename uses a TEXT label (accessibility: no icon-only
+                                             affordance). Opens a small flyout with a text box editing
+                                             the effective title; empty input reverts to the default. -->
+                                        <Button VerticalAlignment="Stretch"
+                                                ToolTipService.ToolTip="Rename this session">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon Glyph="&#xE8AC;" FontSize="14" />
+                                                <TextBlock Text="Rename" />
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <Flyout x:Name="RenameFlyout">
+                                                    <StackPanel Spacing="12" MinWidth="280">
+                                                        <TextBlock Text="Rename session"
+                                                                   Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                                        <TextBox Header="Display name"
+                                                                 Text="{x:Bind ViewModel.RenameDraft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                 AcceptsReturn="False" />
+                                                        <TextBlock Text="Leave blank to restore the automatic name."
+                                                                   TextWrapping="Wrap" FontSize="12"
+                                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <Button Content="Save" Style="{StaticResource AccentButtonStyle}"
+                                                                    Click="OnRenameSaveClick" />
+                                                            <Button Content="Reset to default"
+                                                                    Click="OnRenameResetClick"
+                                                                    IsEnabled="{x:Bind ViewModel.SelectedHasCustomName, Mode=OneWay}" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                        <!-- Pin/Unpin use a TEXT label (not an icon-only affordance) for
                                  accessibility: pin glyphs are ambiguous, so a word makes the action
                                  unmistakable. Exactly one shows, toggled by the observable
                                  SelectedIsPinned so it flips live on pin/unpin. -->

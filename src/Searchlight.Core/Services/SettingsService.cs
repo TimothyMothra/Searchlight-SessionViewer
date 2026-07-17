@@ -16,29 +16,45 @@ public sealed class SettingsService
 {
     private static readonly JsonSerializerOptions s_json = new() { WriteIndented = true };
 
-    private readonly string _path;
+    // Null path => in-memory only (no disk load, no disk save). Used by tests for
+    // isolation so they never read or clobber the real %LOCALAPPDATA% settings.json.
+    private readonly string? _path;
 
     /// <summary>The live settings instance. Bind UI directly to its properties.</summary>
     public AppSettings Current { get; }
 
     /// <summary>Loads settings from disk (or defaults) and wires auto-save.</summary>
     public SettingsService()
+        : this(DefaultPath())
+    {
+    }
+
+    /// <summary>
+    /// Test/advanced constructor. A non-null <paramref name="path"/> loads from and
+    /// saves to that file; a null path yields an isolated, in-memory-only instance
+    /// (defaults, never touches disk).
+    /// </summary>
+    internal SettingsService(string? path)
+    {
+        _path = path;
+        Current = _path is not null ? Load() : new AppSettings();
+        // Auto-persist whenever any setting changes (e.g. the ToggleSwitch flips).
+        Current.PropertyChanged += (_, _) => Save();
+    }
+
+    private static string DefaultPath()
     {
         string dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Searchlight");
-        _path = Path.Combine(dir, "settings.json");
-
-        Current = Load();
-        // Auto-persist whenever any setting changes (e.g. the ToggleSwitch flips).
-        Current.PropertyChanged += (_, _) => Save();
+        return Path.Combine(dir, "settings.json");
     }
 
     private AppSettings Load()
     {
         try
         {
-            if (File.Exists(_path))
+            if (_path is not null && File.Exists(_path))
             {
                 string json = File.ReadAllText(_path);
                 AppSettings? loaded = JsonSerializer.Deserialize<AppSettings>(json, s_json);
@@ -59,6 +75,11 @@ public sealed class SettingsService
     /// <summary>Writes the current settings to disk (best-effort).</summary>
     public void Save()
     {
+        if (_path is null)
+        {
+            return; // In-memory (test) instance: never touch disk.
+        }
+
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);

@@ -23,6 +23,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private readonly List<SessionInfo> _all = [];
     private readonly HashSet<string> _pinnedIds = [];
+    private readonly Dictionary<string, string> _customNames = [];
     private bool _watcherHooked;
     private bool _suppressSelectionSideEffects;
 
@@ -51,6 +52,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         foreach (string id in settings.Current.PinnedSessionIds)
         {
             _pinnedIds.Add(id);
+        }
+
+        // Seed custom display-name overrides from persisted settings.
+        foreach (KeyValuePair<string, string> entry in settings.Current.CustomSessionNames)
+        {
+            _customNames[entry.Key] = entry.Value;
         }
     }
 
@@ -91,6 +98,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _selectedIsPinned;
 
+    /// <summary>
+    /// True when the selected session currently has a custom name override, driving
+    /// the "Reset to default" button's enabled state in the rename flyout.
+    /// </summary>
+    [ObservableProperty]
+    private bool _selectedHasCustomName;
+
+    /// <summary>
+    /// Editable draft bound two-way to the rename flyout's text box. Seeded with the
+    /// selected session's current display name whenever the selection changes.
+    /// </summary>
+    [ObservableProperty]
+    private string _renameDraft = string.Empty;
+
     partial void OnSelectedSessionChanged(SessionInfo? value)
     {
         // During a list rebuild the ListView transiently clears its SelectedItem
@@ -102,6 +123,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         SelectedIsPinned = value is not null && _pinnedIds.Contains(value.Id);
+        SelectedHasCustomName = value is not null && _customNames.ContainsKey(value.Id);
+        RenameDraft = value?.DisplayName ?? string.Empty;
         Details.Load(value);
     }
 
@@ -259,9 +282,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private void ReplaceRow(SessionInfo enriched)
     {
-        // Enrichment builds a fresh record; carry the transient pin flag forward so
-        // a pinned row isn't visually dropped from the Pinned group on enrich.
+        // Enrichment builds a fresh record; carry the transient pin flag and custom
+        // name forward so a pinned/renamed row isn't visually reset on enrich.
         enriched.IsPinned = _pinnedIds.Contains(enriched.Id);
+        enriched.CustomName = _customNames.GetValueOrDefault(enriched.Id);
 
         for (int i = 0; i < _all.Count; i++)
         {
@@ -362,6 +386,56 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ApplyFilter();
     }
 
+    /// <summary>
+    /// Applies <see cref="RenameDraft"/> as the selected session's custom display
+    /// name. A blank draft removes the override (reverts to the auto-generated name).
+    /// Backs the Save button in the details-pane rename flyout.
+    /// </summary>
+    [RelayCommand]
+    private void Rename()
+    {
+        SessionInfo? session = SelectedSession;
+        if (session is null)
+        {
+            return;
+        }
+
+        string trimmed = (RenameDraft ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+        {
+            // Empty input clears the override rather than storing an empty name.
+            _customNames.Remove(session.Id);
+        }
+        else
+        {
+            _customNames[session.Id] = trimmed;
+        }
+
+        PersistCustomNames();
+        ApplyFilter();
+    }
+
+    /// <summary>
+    /// Removes the selected session's custom name override, reverting its title to
+    /// the auto-generated workspace name / UUID. Backs the "Reset to default" button.
+    /// </summary>
+    [RelayCommand]
+    private void ResetName()
+    {
+        SessionInfo? session = SelectedSession;
+        if (session is null || !_customNames.Remove(session.Id))
+        {
+            return;
+        }
+
+        PersistCustomNames();
+        ApplyFilter();
+    }
+
+    // Reassign the settings dictionary (never mutate in place) so SettingsService's
+    // PropertyChanged-driven auto-save fires.
+    private void PersistCustomNames() => Settings.Current.CustomSessionNames = new(_customNames);
+
     private void HookWatcher()
     {
         if (_watcherHooked)
@@ -400,10 +474,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // workspace updated_at diverges from the folder last-write sort key.
         List<SessionInfo> ordered = [.. filtered.OrderByDescending(s => s.UpdatedAt)];
 
-        // Recompute the transient pin flag from the authoritative id set every pass.
+        // Recompute the transient pin flag and custom name from the authoritative
+        // stores every pass so grouping and DisplayName stay in sync.
         foreach (SessionInfo session in ordered)
         {
             session.IsPinned = _pinnedIds.Contains(session.Id);
+            session.CustomName = _customNames.GetValueOrDefault(session.Id);
         }
 
         string? keepId = SelectedSession?.Id;
@@ -466,6 +542,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         // Reload the details pane exactly once, reflecting the final selection.
         SelectedIsPinned = SelectedSession is not null && _pinnedIds.Contains(SelectedSession.Id);
+        SelectedHasCustomName = SelectedSession is not null && _customNames.ContainsKey(SelectedSession.Id);
+        RenameDraft = SelectedSession?.DisplayName ?? string.Empty;
         Details.Load(SelectedSession);
     }
 
