@@ -59,6 +59,24 @@ public sealed record SessionInfo
     /// <summary>True when a <c>checkpoints</c> folder with content exists.</summary>
     public bool HasCheckpoints { get; init; }
 
+    /// <summary>
+    /// True when an <c>events.jsonl</c> exists — i.e. the session actually held a
+    /// conversation. Sessions provisioned but never used (the Copilot App and CLI
+    /// create a session folder on project open) have a <c>workspace.yaml</c> and
+    /// empty sub-folders but no events file. Only meaningful once
+    /// <see cref="IsEnriched"/> is true.
+    /// </summary>
+    public bool HasEvents { get; init; }
+
+    /// <summary>
+    /// True once the expensive per-folder pass has run for this row. The two-phase
+    /// load publishes cheap placeholders first, so file-presence flags such as
+    /// <see cref="HasEvents"/> are not yet known and read <c>false</c>. Consumers
+    /// that act on absence (e.g. the list's hide filters) MUST gate on this flag so
+    /// a placeholder is never mistaken for a genuinely empty session.
+    /// </summary>
+    public bool IsEnriched { get; init; }
+
     // --- convenience projections ---
 
     /// <summary>
@@ -80,6 +98,15 @@ public sealed record SessionInfo
 
     /// <summary>First 8 characters of the UUID, for compact display.</summary>
     public string ShortId => Id.Length >= 8 ? Id[..8] : Id;
+
+    /// <summary>
+    /// True when the session has no name of any kind, so <see cref="DisplayName"/>
+    /// falls back to the bare UUID. Covers both a missing <c>workspace.yaml</c> and
+    /// one whose <c>name</c> was never set (the session was never renamed and no
+    /// auto-name landed).
+    /// </summary>
+    public bool IsUnnamed =>
+        string.IsNullOrWhiteSpace(CustomName) && string.IsNullOrWhiteSpace(Workspace?.Name);
 
     // --- client source (which Copilot surface created the session) ---
 

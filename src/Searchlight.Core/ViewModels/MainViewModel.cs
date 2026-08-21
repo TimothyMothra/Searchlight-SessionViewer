@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -76,6 +77,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             _customNames[entry.Key] = entry.Value;
         }
+
+        // Re-filter whenever a list-hiding setting is toggled so the list responds
+        // to the Settings flyout immediately (no reload required).
+        settings.Current.PropertyChanged += OnSettingsPropertyChanged;
+    }
+
+    private void OnSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(AppSettings.HideEmptySessions)
+            or nameof(AppSettings.HideUnnamedSessions))
+        {
+            ApplyFilter();
+        }
     }
 
     /// <summary>The details pane view-model (empty until a row is selected).</summary>
@@ -106,6 +120,29 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Total sessions discovered, for the status line.</summary>
     [ObservableProperty]
     private int _totalCount;
+
+    /// <summary>
+    /// How many sessions the hide filters removed from the list. Independent of the
+    /// search text — these rows are excluded before the search runs, so they are
+    /// also excluded from search results. Drives the footer notice.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHiddenSessions))]
+    [NotifyPropertyChangedFor(nameof(HiddenNoticeText))]
+    private int _hiddenCount;
+
+    /// <summary>True when at least one session is hidden, revealing the footer notice.</summary>
+    public bool HasHiddenSessions => HiddenCount > 0;
+
+    /// <summary>
+    /// Footer notice text. Deliberately states that hidden sessions are excluded
+    /// from search too, so a user who cannot find a session knows to check the
+    /// filters rather than assume it is gone.
+    /// </summary>
+    public string HiddenNoticeText =>
+        HiddenCount == 1
+            ? "1 hidden (not searched)"
+            : $"{HiddenCount} hidden (not searched)";
 
     /// <summary>
     /// Live pin state of the currently selected session, driving the Pin/Unpin
@@ -543,24 +580,39 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         string query = SearchText?.Trim() ?? string.Empty;
 
-        IEnumerable<SessionInfo> filtered = _all;
+        // Refresh the two cheap in-memory transient flags across EVERY session before
+        // filtering: the hide predicate consults them (a pinned/renamed session is
+        // never hidden), so they must not be stale. Both reads are dictionary
+        // lookups, so doing this over the full list costs nothing.
+        foreach (SessionInfo session in _all)
+        {
+            session.IsPinned = _pinnedIds.Contains(session.Id);
+            session.CustomName = _customNames.GetValueOrDefault(session.Id);
+        }
+
+        // Hide filters run BEFORE the search so a hidden session stays hidden even
+        // when it would match the query. The footer notice tells the user that
+        // hidden rows are excluded from search, so a fruitless search points at the
+        // filters rather than looking like missing data.
+        List<SessionInfo> candidates = [.. _all.Where(IsVisibleUnderHideFilters)];
+        HiddenCount = _all.Count - candidates.Count;
+
+        IEnumerable<SessionInfo> filtered = candidates;
         if (query.Length > 0)
         {
-            filtered = _all.Where(s => Matches(s, query));
+            filtered = candidates.Where(s => Matches(s, query));
         }
 
         // Explicit newest-first ordering so buckets stay contiguous even when
         // workspace updated_at diverges from the folder last-write sort key.
         List<SessionInfo> ordered = [.. filtered.OrderByDescending(s => s.UpdatedAt)];
 
-        // Recompute the transient pin flag, custom name, and note-presence flag from
-        // the authoritative stores every pass so grouping, DisplayName, and the
-        // notes badge stay in sync. For the currently-loaded session use the live
-        // editor text (the disk write is debounced and may lag); others read disk.
+        // Recompute the note-presence flag so the notes badge stays in sync. Unlike
+        // the pin/name flags above this probes disk per session, so it is confined to
+        // the rows that survived filtering. For the currently-loaded session use the
+        // live editor text (the disk write is debounced and may lag); others read disk.
         foreach (SessionInfo session in ordered)
         {
-            session.IsPinned = _pinnedIds.Contains(session.Id);
-            session.CustomName = _customNames.GetValueOrDefault(session.Id);
             session.HasNote = string.Equals(session.Id, _notesSessionId, StringComparison.Ordinal)
                 ? !string.IsNullOrWhiteSpace(SelectedNotes)
                 : _notes.HasNote(session.Id);
@@ -797,6 +849,37 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _ => "?",
     };
 
+    /// <summary>
+    /// Decides whether a session survives the list's hide filters (applied before
+    /// the text search). Two independent opt-outs, both persisted in settings:
+    /// "hide empty sessions" (no <c>events.jsonl</c> — a provisioned-but-unused
+    /// folder) and "hide unnamed sessions" (renders as a bare UUID).
+    /// </summary>
+    private bool IsVisibleUnderHideFilters(SessionInfo session)
+    {
+        // A cheap placeholder has not had its files inspected yet, so "no events"
+        // is unknown rather than false. Never hide a row the two-phase load has not
+        // enriched — it would flicker out and then back in as enrichment lands.
+        if (!session.IsEnriched)
+        {
+            return true;
+        }
+
+        // Explicit user intent outranks both filters: a session the user pinned or
+        // renamed is always shown, however empty or unnamed it is.
+        if (session.IsPinned || !string.IsNullOrWhiteSpace(session.CustomName))
+        {
+            return true;
+        }
+
+        if (Settings.Current.HideEmptySessions && !session.HasEvents)
+        {
+            return false;
+        }
+
+        return !Settings.Current.HideUnnamedSessions || !session.IsUnnamed;
+    }
+
     private static bool Matches(SessionInfo session, string query)
     {
         return Contains(session.DisplayName, query)
@@ -809,11 +892,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private static bool Contains(string? value, string query) =>
         value is not null && value.Contains(query, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Detaches the watcher event.</summary>
+    /// <summary>Detaches the watcher and settings events.</summary>
     public void Dispose()
     {
         // Persist any unsaved note before teardown.
         FlushPendingNotes();
+
+        Settings.Current.PropertyChanged -= OnSettingsPropertyChanged;
 
         if (_watcherHooked)
         {

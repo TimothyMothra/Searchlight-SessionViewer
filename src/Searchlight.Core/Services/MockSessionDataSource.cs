@@ -213,6 +213,12 @@ public sealed class MockSessionDataSource : ISessionDataSource
             HasPlan = withDetail,
             IsInUse = minutesAgo < 30,
             JournalActivity = withDetail ? $"working on {title.ToLowerInvariant()}" : null,
+
+            // Every synthetic session represents a real conversation, so it is both
+            // fully enriched and non-empty — the list's default "hide empty sessions"
+            // filter must never hide a demo row.
+            HasEvents = true,
+            IsEnriched = true,
         };
 
         if (withDetail)

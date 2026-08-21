@@ -121,8 +121,10 @@ public sealed class SessionStateScanner
     /// <summary>
     /// Upgrades a cheap placeholder (from <see cref="ScanFolderCheap"/>) with the
     /// expensive per-folder facts: <c>workspace.yaml</c> metadata plus the
-    /// lock/plan/session-db/checkpoint presence flags. Returns a copy; on failure
-    /// returns the input unchanged so a bad folder never drops the row.
+    /// lock/plan/session-db/checkpoint/events presence flags. Returns a copy; on
+    /// failure returns the input unchanged so a bad folder never drops the row —
+    /// which also leaves <see cref="SessionInfo.IsEnriched"/> false, so the list's
+    /// hide filters treat it as "unknown" rather than empty.
     /// </summary>
     public SessionInfo EnrichFolder(SessionInfo session)
     {
@@ -138,6 +140,8 @@ public sealed class SessionStateScanner
                 HasPlan = HasPlanFile(folderPath),
                 HasSessionDb = File.Exists(CopilotPaths.SessionDb(folderPath)),
                 HasCheckpoints = HasCheckpointContent(folderPath),
+                HasEvents = File.Exists(CopilotPaths.EventsJsonl(folderPath)),
+                IsEnriched = true,
             };
         }
         catch (Exception)

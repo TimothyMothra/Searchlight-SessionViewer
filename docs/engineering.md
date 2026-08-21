@@ -169,13 +169,24 @@ Microsoft.NET.Test.Sdk 17.11.1 · xunit 2.9.2 · xunit.runner.visualstudio 2.8.2
 ### Settings (`AppSettings`)
 
 Persisted as JSON at `%LOCALAPPDATA%\Searchlight\settings.json`, auto-saved on any property
-change (`SettingsService`). Three toggles, exposed via the titlebar gear flyout:
+change (`SettingsService`). Five toggles, exposed via the titlebar gear flyout:
 
 | Setting | Default | Effect |
 |---------|:-------:|--------|
 | `UseSharedTerminalWindow` | **on** (opt-out) | Resume opens a **new tab** in your most-recently-used Windows Terminal window (`-w last`); off → each resume opens its **own** new window (`-w new`). |
 | `RunElevated` | **off** | Relaunch the app elevated/non-elevated. A process can't change integrity level in place, so toggling **restarts** the app (elevate via `runas`; de-elevate by relaunching through `explorer.exe`). Needed because a non-elevated `wt -w` can't attach a tab to an **Admin** Terminal (UIPI). |
 | `AppendYolo` | **off** (opt-in) | Append `--yolo` to the resume command (auto-approves tool actions in the resumed session). Does **not** restart the app. |
+| `HideEmptySessions` | **on** (opt-out) | Hide sessions with no `events.jsonl` — folders Copilot provisions on project open that never held a conversation. Information-lossless: they contain no messages, and no *named* session lacks events. |
+| `HideUnnamedSessions` | **off** (opt-in) | Hide every session still showing a bare UUID. Stronger than the above — also hides older sessions that hold real conversations but predate auto-naming. |
+
+Both hide filters apply **before** the search box, so hidden sessions are excluded from search
+results too; the footer shows an `N hidden (not searched)` notice so a fruitless search points at
+the filters rather than looking like missing data. **Pinned and renamed sessions are never hidden**
+by either filter, and neither is a row the two-phase load hasn't enriched yet (`IsEnriched == false`),
+since absent flags there mean *unknown*, not *empty*. Flipping either toggle re-filters live — no reload.
+
+Real-data scale (908 folders): `HideEmptySessions` alone drops 340 rows → **568 visible**; enabling
+both drops 601 → **307 visible**.
 
 When elevated, the titlebar shows a **white UAC shield** at the far left (matching Windows Terminal's
 admin affordance).
