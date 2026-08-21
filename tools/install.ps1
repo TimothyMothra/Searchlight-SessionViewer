@@ -121,6 +121,23 @@ if ($Action -eq 'Uninstall') {
 }
 
 # --- Install -----------------------------------------------------------------
+# Pre-flight: a running Searchlight holds file locks inside $InstallDir. The
+# publish step below is harmless, but the install step does `Remove-Item
+# $InstallDir -Recurse`, and PowerShell deletes what it can BEFORE hitting the
+# locked file and erroring — which leaves the installed app half-deleted (the
+# in-memory process keeps running, but the on-disk copy can no longer start).
+# Fail fast, before the slow publish, rather than corrupting a working install.
+$running = @(Get-Process -Name 'Searchlight' -ErrorAction SilentlyContinue)
+if ($running.Count -gt 0 -and -not $SkipPublish) {
+    $pids = ($running | ForEach-Object { $_.Id }) -join ', '
+    throw @"
+Searchlight is running (PID $pids) and holds locks in the install folder.
+Close it first, then re-run this script:
+  - right-click the tray icon and choose Exit (the window's X only hides it), or
+  - Stop-Process -Id $($running[0].Id) -Force   (needs an elevated shell if the app runs elevated)
+"@
+}
+
 # Resolve the runtime identifier from the current OS architecture.
 $rid = switch ($env:PROCESSOR_ARCHITECTURE) {
     'ARM64' { 'win-arm64' }
@@ -152,10 +169,29 @@ if (-not $SkipPublish) {
     if (-not (Test-Path $publishedExe)) { throw "Publish succeeded but $ExeName not found in $publishDir." }
 
     Write-Step 'Copying published output to the install folder...'
-    if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
+
+    # Move the old folder aside rather than deleting it in place. A directory
+    # rename either succeeds outright or fails without touching anything, whereas
+    # `Remove-Item -Recurse` deletes every file it can and only then errors on a
+    # locked one — which is exactly how a working install gets left half-deleted.
+    # The new build is copied into a clean folder, and the old one is removed last
+    # (best-effort: if a still-running instance holds locks, leaving it costs a
+    # little disk but never breaks the install).
+    $backupDir = "$InstallDir.old"
+    if (Test-Path $backupDir) { Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $InstallDir) { Move-Item $InstallDir $backupDir }
+
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     Copy-Item -Path (Join-Path $publishDir '*') -Destination $InstallDir -Recurse -Force
     Remove-Item $publishDir -Recurse -Force
+
+    if (Test-Path $backupDir) {
+        Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $backupDir) {
+            Write-Host "  ! left $backupDir behind (files still in use); safe to delete later" -ForegroundColor Yellow
+        }
+    }
+
     Write-Ok "installed to $InstallDir"
 }
 

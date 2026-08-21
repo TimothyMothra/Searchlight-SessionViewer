@@ -118,7 +118,23 @@ dotnet run --project C:\REPOS\Searchlight\src\Searchlight -c Debug -- --demo
 
 # ── Test ───────────────────────────────────────────────────────────────────
 dotnet test C:\REPOS\Searchlight\src\Searchlight.Core.Tests\Searchlight.Core.Tests.csproj
+
+# ── Install / deploy ───────────────────────────────────────────────────────
+# Publishes self-contained to %LOCALAPPDATA%\Searchlight\app and creates the
+# Start Menu / desktop / run-at-login shortcuts. EXIT THE APP FIRST (tray icon
+# -> Exit; the window's X only hides it) or the script aborts on its pre-flight.
+pwsh -File C:\REPOS\Searchlight\tools\install.ps1
+pwsh -File C:\REPOS\Searchlight\tools\install.ps1 -Action Uninstall
 ```
+
+**Deploying is what makes a change visible.** `dotnet build`/`run` only touch `bin\`; the
+Start Menu, desktop, and login shortcuts all point at `%LOCALAPPDATA%\Searchlight\app`, so a
+change is not testable through the normal launch path until `install.ps1` republishes there.
+The script refuses to run while Searchlight is running, and swaps the install folder aside
+rather than deleting it in place — a `Remove-Item -Recurse` over a locked file deletes
+everything it *can* before erroring, which silently leaves a half-deleted, unlaunchable
+install behind. Settings survive a reinstall: `settings.json` lives in the **parent**
+`%LOCALAPPDATA%\Searchlight\`, not the replaced `app\` folder.
 
 **Diagnostics:** the app writes breadcrumbs to `%TEMP%\Searchlight.log`. Core routes its
 own breadcrumbs there through the `CoreLog.Sink` seam. A healthy live launch logs e.g.
