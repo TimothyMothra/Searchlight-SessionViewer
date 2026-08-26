@@ -93,6 +93,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>Free-text filter over name, id, cwd, and branch.</summary>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ClearSearchCommand))]
     private string _searchText = string.Empty;
 
     /// <summary>True while a full reload is in flight.</summary>
@@ -411,6 +412,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Re-runs <see cref="LoadAsync"/> to pick up on-disk changes.</summary>
     [RelayCommand]
     private Task RefreshAsync() => LoadAsync();
+
+    /// <summary>
+    /// Empties <see cref="SearchText"/>, which re-runs the filter through
+    /// <c>OnSearchTextChanged</c>. Backs the labelled "Clear" button that replaces the
+    /// TextBox's built-in icon-only inline clear glyph (which carries no visible text).
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanClearSearch))]
+    private void ClearSearch() => SearchText = string.Empty;
+
+    // Disabled (rather than hidden) while the box is empty so the toolbar never
+    // reflows and the affordance stays discoverable.
+    private bool CanClearSearch() => !string.IsNullOrEmpty(SearchText);
 
     /// <summary>Pins a session to the top of the list and persists the pin.</summary>
     [RelayCommand]

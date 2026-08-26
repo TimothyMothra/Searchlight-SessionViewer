@@ -100,30 +100,49 @@
             </Button>
         </Grid>
 
-        <!-- Search + refresh -->
+        <!-- Search + refresh. Both action buttons use the app-wide "<glyph> <label>"
+             pattern (see Pin/Rename/Resume) so no control is icon-only. -->
         <Grid Grid.Row="1" Padding="16,4,16,8" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
+            <!-- Loaded handler neutralizes the TextBox's built-in inline delete part,
+                 whose bare "x" glyph carries no visible label; the Clear button below
+                 replaces it. -->
             <TextBox Grid.Column="0"
                      PlaceholderText="Search name, id, folder, branch, prompt…"
                      Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     Loaded="OnSearchBoxLoaded"
                      VerticalAlignment="Center"
                      HorizontalAlignment="Stretch" />
 
-            <ProgressRing Grid.Column="1"
+            <Button Grid.Column="1"
+                    Command="{x:Bind ViewModel.ClearSearchCommand}"
+                    VerticalAlignment="Center"
+                    ToolTipService.ToolTip="Clear the search box">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE711;" FontSize="14" />
+                    <TextBlock Text="Clear" />
+                </StackPanel>
+            </Button>
+
+            <ProgressRing Grid.Column="2"
                           IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
                           Width="20" Height="20"
                           VerticalAlignment="Center" />
 
-            <Button Grid.Column="2"
+            <Button Grid.Column="3"
                     Command="{x:Bind ViewModel.RefreshCommand}"
                     VerticalAlignment="Center"
-                    ToolTipService.ToolTip="Refresh">
-                <FontIcon Glyph="&#xE72C;" FontSize="16" />
+                    ToolTipService.ToolTip="Reload sessions from disk">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                    <TextBlock Text="Refresh" />
+                </StackPanel>
             </Button>
         </Grid>
 

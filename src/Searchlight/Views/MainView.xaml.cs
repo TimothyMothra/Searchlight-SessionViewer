@@ -239,6 +239,55 @@ public sealed partial class MainView : UserControl
         Searchlight.App.LogVerbose($"resize: end ({reason})");
     }
 
+    /// <summary>
+    /// Neutralizes the search TextBox's built-in inline delete part. Its bare "x" glyph
+    /// is icon-only with no visible label, so it is replaced by the labelled "Clear"
+    /// button beside the box.
+    /// </summary>
+    /// <remarks>
+    /// ASSUMPTION: the WinUI TextBox template names this part "DeleteButton" (the
+    /// documented part name). If a future template renames it, the lookup simply finds
+    /// nothing and the inline glyph reappears — no crash, no functional loss.
+    /// The part's Visibility is driven by the template's visual states, which win over
+    /// a local Visibility value, so the geometry and hit-testing are zeroed as well.
+    /// </remarks>
+    private void OnSearchBoxLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox box || FindDescendantByName(box, "DeleteButton") is not FrameworkElement part)
+        {
+            Searchlight.App.LogVerbose("search box: inline DeleteButton part not found (template changed?)");
+            return;
+        }
+
+        part.Visibility = Visibility.Collapsed;
+        part.Width = 0;
+        part.MinWidth = 0;
+        part.Opacity = 0;
+        part.IsHitTestVisible = false;
+        Searchlight.App.LogVerbose("search box: inline DeleteButton part suppressed");
+    }
+
+    private static FrameworkElement? FindDescendantByName(DependencyObject root, string name)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement element && element.Name == name)
+            {
+                return element;
+            }
+
+            FrameworkElement? nested = FindDescendantByName(child, name);
+            if (nested is not null)
+            {
+                return nested;
+            }
+        }
+
+        return null;
+    }
+
     private static ScrollViewer? FindDescendantScrollViewer(DependencyObject root)
     {
         int count = VisualTreeHelper.GetChildrenCount(root);
