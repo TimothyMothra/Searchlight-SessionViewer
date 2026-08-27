@@ -35,6 +35,12 @@
     Reuse an existing installed app folder instead of re-publishing (only
     recreates the shortcuts). Useful for quickly recreating shortcuts.
 
+.PARAMETER StopRunning
+    Force-stop a running Searchlight instance instead of prompting for it. Note
+    this skips the app's graceful shutdown, which flushes pending note edits
+    (debounced ~600ms), so a few final keystrokes in the Notes pane could be lost.
+    Exiting from the tray icon is always the safer option.
+
 .EXAMPLE
     pwsh -File tools\install.ps1
     Full install: publish + Start Menu + desktop + run-at-login shortcuts.
@@ -56,7 +62,8 @@ param(
 
     [switch]$NoDesktop,
     [switch]$NoStartup,
-    [switch]$SkipPublish
+    [switch]$SkipPublish,
+    [switch]$StopRunning
 )
 
 $ErrorActionPreference = 'Stop'
@@ -100,9 +107,106 @@ function Remove-IfPresent($path) {
     }
 }
 
+# Opening for WRITE with no sharing is the same access the upcoming Remove-Item
+# needs, so this is a direct test of "will the delete fail?" rather than a guess
+# based on process names (a dev build running from bin\ does not lock the install).
+function Test-PathLocked {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return $false }
+    try {
+        $stream = [System.IO.File]::Open($Path, 'Open', 'Write', 'None')
+        $stream.Close()
+        return $false
+    }
+    catch {
+        return $true
+    }
+}
+
+function Wait-ForUnlock {
+    param([string]$Path, [int]$TimeoutSeconds = 15)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-PathLocked $Path)) { return $true }
+        Start-Sleep -Milliseconds 300
+    }
+    return -not (Test-PathLocked $Path)
+}
+
+function Stop-RunningInstances {
+    param([string]$Path)
+
+    $procs = @(Get-Process -Name 'Searchlight' -ErrorAction SilentlyContinue)
+    if ($procs.Count -eq 0) {
+        # Locked but no visible process: almost always an elevated instance that a
+        # non-elevated shell cannot enumerate.
+        throw "$Path is locked but no Searchlight process is visible to this shell. It is probably running elevated - exit it from the tray icon, or rerun this script from an elevated terminal."
+    }
+
+    foreach ($p in $procs) {
+        Write-Step "Stopping Searchlight (PID $($p.Id))..."
+        try {
+            Stop-Process -Id $p.Id -Force -ErrorAction Stop
+            Write-Ok "stopped PID $($p.Id)"
+        }
+        catch {
+            throw "Could not stop PID $($p.Id): $($_.Exception.Message). If it is running elevated, exit it from the tray icon or rerun this script from an elevated terminal."
+        }
+    }
+}
+
+# The install step deletes $InstallDir wholesale, which fails while a running
+# instance holds its exe open. Detect that up front and resolve it, rather than
+# letting Remove-Item fail midway and leave a half-installed folder.
+function Assert-InstallDirWritable {
+    param([string]$Path, [switch]$AutoStop)
+
+    if (-not (Test-PathLocked $Path)) { return }
+
+    Write-Host ''
+    Write-Host 'Searchlight is running and is holding the install folder open.' -ForegroundColor Yellow
+    Write-Host "  $Path" -ForegroundColor Gray
+
+    if ($AutoStop) {
+        Stop-RunningInstances -Path $Path
+    }
+    else {
+        Write-Host ''
+        Write-Host 'Preferred: right-click the tray icon and choose Exit. That shuts down' -ForegroundColor Gray
+        Write-Host 'cleanly and flushes any pending note edits.' -ForegroundColor Gray
+        Write-Host ''
+        Write-Host 'Press ENTER once it has exited, or type F then ENTER to force-stop it' -ForegroundColor Gray
+        Write-Host 'now (may lose the last few keystrokes in the Notes pane).' -ForegroundColor Gray
+
+        # Read-Host throws under -NonInteractive / redirected input (CI, task
+        # scheduler, an agent shell). Fail with instructions rather than a raw
+        # PowerShell prompt error.
+        try {
+            $answer = Read-Host 'ENTER = retry, F = force-stop, C = cancel'
+        }
+        catch {
+            throw 'Searchlight is running and this shell cannot prompt. Exit it from the tray icon, or rerun with -StopRunning to force-stop it.'
+        }
+
+        switch -Regex ($answer.Trim()) {
+            '^[Ff]' { Stop-RunningInstances -Path $Path }
+            '^[Cc]' { throw 'Install cancelled.' }
+        }
+    }
+
+    if (-not (Wait-ForUnlock -Path $Path)) {
+        throw "$Path is still locked. Exit Searchlight (tray icon -> Exit) and run this script again."
+    }
+
+    Write-Ok 'install folder is free'
+}
+
 # --- Uninstall ---------------------------------------------------------------
 if ($Action -eq 'Uninstall') {
     Write-Step 'Uninstalling Searchlight...'
+    Assert-InstallDirWritable -Path $ExePath -AutoStop:$StopRunning
     Remove-IfPresent $StartMenuLnk
     Remove-IfPresent $StartupLnk
     Remove-IfPresent $DesktopLnk
@@ -134,6 +238,10 @@ Write-Step "Target RID: $rid ($platform)"
 Write-Step "Install to: $InstallDir"
 
 if (-not $SkipPublish) {
+    # Check before the (slow) publish so a locked folder fails in seconds rather
+    # than after a full self-contained build.
+    Assert-InstallDirWritable -Path $ExePath -AutoStop:$StopRunning
+
     Write-Step "Publishing self-contained ($Configuration)..."
     $publishDir = Join-Path $RepoRoot "src\Searchlight\bin\$Configuration\_publish_$rid"
 

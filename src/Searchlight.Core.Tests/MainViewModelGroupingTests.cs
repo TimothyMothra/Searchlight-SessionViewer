@@ -84,4 +84,54 @@ public sealed class MainViewModelGroupingTests
         Assert.Equal(15, vm.TotalCount);
         Assert.Single(vm.SessionGroups.SelectMany(g => g));
     }
+
+    [Fact]
+    public void HasSearchText_TracksTheSearchBoxContent()
+    {
+        MainViewModel vm = BuildViewModel();
+
+        Assert.False(vm.HasSearchText);
+
+        vm.SearchText = "abc";
+        Assert.True(vm.HasSearchText);
+
+        // Whitespace filters nothing (ApplyFilter trims) but the box is not empty,
+        // so the Clear affordance must stay available.
+        vm.SearchText = "   ";
+        Assert.True(vm.HasSearchText);
+
+        vm.SearchText = string.Empty;
+        Assert.False(vm.HasSearchText);
+    }
+
+    [Fact]
+    public void ClearSearchCommand_EmptiesTheQueryAndTracksCanExecute()
+    {
+        MainViewModel vm = BuildViewModel();
+
+        Assert.False(vm.ClearSearchCommand.CanExecute(null));
+
+        vm.SearchText = "payment-retry";
+        Assert.True(vm.ClearSearchCommand.CanExecute(null));
+
+        vm.ClearSearchCommand.Execute(null);
+
+        Assert.Equal(string.Empty, vm.SearchText);
+        Assert.False(vm.HasSearchText);
+        Assert.False(vm.ClearSearchCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task ClearSearchCommand_RestoresTheUnfilteredRowCount()
+    {
+        MainViewModel vm = BuildViewModel();
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        vm.SearchText = "payment-retry";
+        Assert.Equal(1, vm.VisibleCount);
+
+        vm.ClearSearchCommand.Execute(null);
+
+        Assert.Equal(15, vm.VisibleCount);
+    }
 }

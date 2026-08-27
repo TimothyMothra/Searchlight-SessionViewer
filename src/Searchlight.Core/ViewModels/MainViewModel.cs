@@ -94,7 +94,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Free-text filter over name, id, cwd, and branch.</summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ClearSearchCommand))]
+    [NotifyPropertyChangedFor(nameof(HasSearchText))]
     private string _searchText = string.Empty;
+
+    /// <summary>
+    /// True when the search box holds any text. Drives both the Clear button's
+    /// visibility and its command's CanExecute, so the two can never disagree.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately <c>IsNullOrEmpty</c>, not <c>IsNullOrWhiteSpace</c>: a
+    /// whitespace-only query filters nothing (ApplyFilter trims), but the box is
+    /// not empty, so the user still needs a way to clear it.
+    /// </remarks>
+    public bool HasSearchText => !string.IsNullOrEmpty(SearchText);
 
     /// <summary>True while a full reload is in flight.</summary>
     [ObservableProperty]
@@ -421,9 +433,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanClearSearch))]
     private void ClearSearch() => SearchText = string.Empty;
 
-    // Disabled (rather than hidden) while the box is empty so the toolbar never
-    // reflows and the affordance stays discoverable.
-    private bool CanClearSearch() => !string.IsNullOrEmpty(SearchText);
+    // The button is hidden (not just disabled) when there is nothing to clear, so
+    // CanExecute is belt-and-braces for non-UI invocations (automation, keyboard).
+    private bool CanClearSearch() => HasSearchText;
 
     /// <summary>Pins a session to the top of the list and persists the pin.</summary>
     [RelayCommand]
