@@ -13,7 +13,7 @@ so every enrichment field degrades to empty/null rather than throwing.
 
 | Source (under `~/.copilot`) | Reader | What it yields | Cost |
 |-----------------------------|--------|----------------|------|
-| `session-state/<id>/` folders | `SessionStateScanner` | One base `SessionInfo` per folder: `Id`, `FolderName`, `FolderPath`, `Kind`, `LastWriteTime`, presence flags (`IsInUse` via `inuse.<PID>.lock`, `HasPlan`, `HasSessionDb`, `HasCheckpoints`). Splits `optimistic-chat-` prefix → `Chat`, else `Project`. | cheap (bulk) |
+| `session-state/<id>/` folders | `SessionStateScanner` | One base `SessionInfo` per folder: `Id`, `FolderName`, `FolderPath`, `Kind`, `LastWriteTime`, presence flags (`IsInUse` via `inuse.<PID>.lock`, `HasPlan`, `HasSessionDb`, `HasCheckpoints`, `HasEvents`) and `IsEnriched`. Splits `optimistic-chat-` prefix → `Chat`, else `Project`. | cheap (bulk) |
 | `session-state/<id>/workspace.yaml` | `WorkspaceYamlReader` | `WorkspaceMetadata` (name, cwd, `client_name`, created/updated, user-named, summary count, MC ids) via YamlDotNet. | cheap (bulk) |
 | `session-state/<id>/events.jsonl` | `EventsJsonlReader` | `SessionStartInfo` — head-parse only (≤ `MaxLines`): `session.start` baseline + latest `session.model_change` + first `user.message` preview. Full ~300 KB log never materialized. | heavy (lazy) |
 | `status-snapshots/index.db` (table `snapshots`) | `SnapshotIndexReader` | Branch + snapshot count per session (bulk index scan); `SnapshotInfo` rows on demand. Read-only SQLite. | cheap bulk / heavy detail |
@@ -56,6 +56,7 @@ stored fields it exposes computed **projections**:
 |------------|------|
 | `DisplayName` | Workspace `Name` if set, else the **full** UUID (never truncated). |
 | `ShortId` | First 8 chars of the UUID (compact contexts only). |
+| `IsUnnamed` | True when no custom name **and** no workspace name, so `DisplayName` falls back to the bare UUID. Drives the optional "hide unnamed sessions" filter. |
 | `ClientLabel` / `IsCliClient` / `IsAppClient` / `ClientNameRaw` | From `workspace.yaml` `client_name` (see §2). |
 | `Cwd` | Workspace `Cwd`, falling back to the start-event `Cwd`. |
 | `Model` / `ReasoningEffort` / `CopilotVersion` / `FirstPromptPreview` | From the `events.jsonl` head (`Start`). |
@@ -74,7 +75,7 @@ stored fields it exposes computed **projections**:
 | `SessionTodo` | id, title, status (`pending`/`in_progress`/`done`/`blocked`) | `session.db` |
 | `JournalEntry` | time, session id, branch, cwd, activity | `journal/<YYYY-MM>.md` |
 | `SessionGroup` | `ObservableCollection<SessionInfo>` + `Key` header text | built by `MainViewModel` |
-| `AppSettings` | `UseSharedTerminalWindow`, `RunElevated`, `AppendYolo` | `settings.json` (app-owned, writable) |
+| `AppSettings` | `UseSharedTerminalWindow`, `RunElevated`, `AppendYolo`, `HideEmptySessions`, `HideUnnamedSessions` | `settings.json` (app-owned, writable) |
 
 > `settings.json` at `%LOCALAPPDATA%\Searchlight\` is the **only** file the app writes — it
 > is app configuration, not user Copilot data.
@@ -83,8 +84,32 @@ stored fields it exposes computed **projections**:
 
 ## 4. Grouping model (left pane)
 
-`MainViewModel.ApplyFilter()` sorts sessions newest-first and builds contiguous `SessionGroup`
-buckets via `GroupKeyFor(updatedAt, now)`:
+`MainViewModel.ApplyFilter()` runs three stages: **hide filters → text search → grouping**.
+
+### 4a. Hide filters (before search)
+
+Two persisted opt-outs prune `_all` before anything else, so a hidden session is excluded from
+search results too:
+
+| Filter | Setting (default) | Predicate | Real-data effect (908 folders) |
+|--------|-------------------|-----------|-------------------------------|
+| Empty sessions | `HideEmptySessions` (**on**) | `IsEnriched && !HasEvents` | −340 rows |
+| Unnamed sessions | `HideUnnamedSessions` (**off**) | `IsUnnamed` | −601 rows (superset of the above) |
+
+Both filters are overridden by explicit user intent — a **pinned** or **renamed** session is always
+shown — and neither applies to a row still awaiting enrichment (`IsEnriched == false`), because a
+cheap placeholder's `HasEvents = false` means *not yet inspected*, not *empty*; hiding it would make
+rows flicker out and back in mid-load. `HiddenCount` feeds a footer notice (`N hidden (not searched)`)
+so a fruitless search points at the filters instead of looking like missing data.
+
+Why the empty-session filter is safe to default on: a stub folder holds a `workspace.yaml` and empty
+sub-folders but **no `events.jsonl`** — it never held a conversation — and on real data **no named
+session lacks events**, so the filter can never hide something the user named.
+
+### 4b. Grouping
+
+Sessions are sorted newest-first and bucketed into contiguous `SessionGroup`s via
+`GroupKeyFor(updatedAt, now)`:
 
 - **Last 2 / 4 / 8 / 16 / 32 hours** — relative windows (strict `<` at each boundary).
 - Older than 32h → an **absolute calendar-day** header (`"dddd, MMMM d, yyyy"` of the last update).
@@ -103,6 +128,9 @@ screenshotted with **zero** proprietary information. Shape (locked by unit tests
 - Each detailed session seeds **3 checkpoints**, **3 snapshots** (`SnapshotCount = 3`), **4 todos**
   (`done`, `done`, `in_progress`, `pending`).
 - Plain (non-detailed) sessions carry no detail collections.
+- Every row sets `HasEvents = IsEnriched = true`, so the default **hide empty sessions** filter never
+  hides a demo row. Six rows are deliberately **unnamed** (render as a UUID), which also exercises the
+  opt-in `HideUnnamedSessions` filter: 15 visible by default → 9 with it enabled.
 - Both client kinds (CLI + App) and both session kinds (Project + Chat) are represented.
 - Demo launch logs `data source returned 15 sessions` → `published 15 rows in 9 groups`
   (~0.05 s vs ~6 s live), proving no real-data access.

@@ -67,4 +67,24 @@ public sealed partial class AppSettings : ObservableObject
     /// </summary>
     [ObservableProperty]
     private bool _notesPaneVisible;
+
+    /// <summary>
+    /// When true (the default), sessions that never held a conversation are hidden
+    /// from the list. Both the Copilot App and the CLI provision a session folder on
+    /// project open, so a large share of <c>session-state</c> is stub folders with a
+    /// <c>workspace.yaml</c> but no <c>events.jsonl</c>. They always render as a bare
+    /// UUID and crowd out real work. Hiding them is information-lossless: a stub
+    /// contains no conversation, and every named session has events.
+    /// </summary>
+    [ObservableProperty]
+    private bool _hideEmptySessions = true;
+
+    /// <summary>
+    /// When true, sessions that show a bare UUID (no workspace name and no rename)
+    /// are hidden. Off by default because — unlike
+    /// <see cref="HideEmptySessions"/> — this also hides older sessions that hold
+    /// real conversations but predate auto-naming, so enabling it can bury real work.
+    /// </summary>
+    [ObservableProperty]
+    private bool _hideUnnamedSessions;
 }

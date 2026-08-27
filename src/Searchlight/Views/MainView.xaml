@@ -57,7 +57,26 @@
                 <FontIcon Glyph="&#xE713;" FontSize="16" />
                 <Button.Flyout>
                     <Flyout>
-                        <StackPanel Width="320" Spacing="8">
+                        <!-- The default FlyoutPresenter caps its content at
+                             FlyoutThemeMaxWidth (456px) and pads 12px per side, so a
+                             panel wider than that overflows into a HORIZONTAL
+                             scrollbar. Widening the inner panel alone therefore makes
+                             things worse, not better — the presenter itself has to be
+                             widened. Horizontal scrolling is disabled outright so long
+                             text can only ever wrap, whatever the content width. -->
+                        <Flyout.FlyoutPresenterStyle>
+                            <Style TargetType="FlyoutPresenter"
+                                   BasedOn="{StaticResource DefaultFlyoutPresenterStyle}">
+                                <Setter Property="MinWidth" Value="600" />
+                                <Setter Property="MaxWidth" Value="600" />
+                                <Setter Property="ScrollViewer.HorizontalScrollMode" Value="Disabled" />
+                                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+                            </Style>
+                        </Flyout.FlyoutPresenterStyle>
+
+                        <!-- No explicit Width: the panel stretches to the presenter's
+                             inner width, so content can never exceed it. -->
+                        <StackPanel Spacing="8">
                             <TextBlock Text="Settings"
                                        Style="{StaticResource SubtitleTextBlockStyle}" />
                             <TextBlock Text="Reuse my existing terminal window"
@@ -94,6 +113,32 @@
                             <ToggleSwitch MinWidth="0"
                                           OnContent="On" OffContent="Off"
                                           IsOn="{x:Bind ViewModel.Settings.Current.AppendYolo, Mode=TwoWay}" />
+
+                            <!-- Session-list hide filters. Each description must stand
+                                 on its own: a setting that explains itself in terms of
+                                 another setting can't be read or reasoned about
+                                 independently, so the shared facts (excluded from
+                                 search; pinned/renamed always visible) are stated in
+                                 full on both rather than cross-referenced. -->
+                            <TextBlock Text="Hide empty sessions"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       TextWrapping="Wrap" Margin="0,8,0,0" />
+                            <TextBlock TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="Hides sessions that never held a conversation — the folders Copilot creates whenever a project is opened. They contain no messages, so nothing is lost. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
+                            <ToggleSwitch MinWidth="0"
+                                          OnContent="On" OffContent="Off"
+                                          IsOn="{x:Bind ViewModel.Settings.Current.HideEmptySessions, Mode=TwoWay}" />
+
+                            <TextBlock Text="Hide unnamed sessions"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       TextWrapping="Wrap" Margin="0,8,0,0" />
+                            <TextBlock TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="Hides sessions that show only a UUID because they were never named. Some of these do hold real conversations. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
+                            <ToggleSwitch MinWidth="0"
+                                          OnContent="On" OffContent="Off"
+                                          IsOn="{x:Bind ViewModel.Settings.Current.HideUnnamedSessions, Mode=TwoWay}" />
                         </StackPanel>
                     </Flyout>
                 </Button.Flyout>
@@ -617,6 +662,16 @@
                     <TextBlock Text="{x:Bind ViewModel.TotalCount, Mode=OneWay}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
                     <TextBlock Text="sessions" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+
+                    <!-- Hidden-count notice. Visible only when a hide filter actually
+                         removed rows, so a user who cannot find a session learns that
+                         hidden rows are excluded from search rather than assuming the
+                         session is gone. -->
+                    <TextBlock Text="{x:Bind ViewModel.HiddenNoticeText, Mode=OneWay}"
+                               Visibility="{x:Bind ViewModel.HasHiddenSessions, Mode=OneWay, Converter={StaticResource BoolToVis}}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               FontSize="12" FontStyle="Italic"
+                               ToolTipService.ToolTip="Hidden by the session-list filters in Settings. Hidden sessions are also excluded from search — turn a filter off to include them." />
                 </StackPanel>
 
                 <TextBlock Grid.Column="1"
