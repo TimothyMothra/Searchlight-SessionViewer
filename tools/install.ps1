@@ -107,9 +107,9 @@ function Remove-IfPresent($path) {
     }
 }
 
-# Opening for WRITE with no sharing is the same access the upcoming Remove-Item
-# needs, so this is a direct test of "will the delete fail?" rather than a guess
-# based on process names (a dev build running from bin\ does not lock the install).
+# Detects a running instance by testing the exe for a write lock, rather than
+# matching process names: a dev build running from bin\ shares the name but does
+# not lock the installed copy, and would otherwise be a false positive.
 function Test-PathLocked {
     param([string]$Path)
 
@@ -157,9 +157,11 @@ function Stop-RunningInstances {
     }
 }
 
-# The install step deletes $InstallDir wholesale, which fails while a running
-# instance holds its exe open. Detect that up front and resolve it, rather than
-# letting Remove-Item fail midway and leave a half-installed folder.
+# The move-aside-then-copy install below survives a running instance, so this is
+# not a correctness guard. It exists because succeeding silently is the wrong
+# outcome: the user keeps using the old in-memory build while the new one sits on
+# disk unused, and the locked $InstallDir.old cannot be cleaned up. Resolving it
+# up front means the new build is the one actually running afterwards.
 function Assert-InstallDirWritable {
     param([string]$Path, [switch]$AutoStop)
 
@@ -225,23 +227,6 @@ if ($Action -eq 'Uninstall') {
 }
 
 # --- Install -----------------------------------------------------------------
-# Pre-flight: a running Searchlight holds file locks inside $InstallDir. The
-# publish step below is harmless, but the install step does `Remove-Item
-# $InstallDir -Recurse`, and PowerShell deletes what it can BEFORE hitting the
-# locked file and erroring — which leaves the installed app half-deleted (the
-# in-memory process keeps running, but the on-disk copy can no longer start).
-# Fail fast, before the slow publish, rather than corrupting a working install.
-$running = @(Get-Process -Name 'Searchlight' -ErrorAction SilentlyContinue)
-if ($running.Count -gt 0 -and -not $SkipPublish) {
-    $pids = ($running | ForEach-Object { $_.Id }) -join ', '
-    throw @"
-Searchlight is running (PID $pids) and holds locks in the install folder.
-Close it first, then re-run this script:
-  - right-click the tray icon and choose Exit (the window's X only hides it), or
-  - Stop-Process -Id $($running[0].Id) -Force   (needs an elevated shell if the app runs elevated)
-"@
-}
-
 # Resolve the runtime identifier from the current OS architecture.
 $rid = switch ($env:PROCESSOR_ARCHITECTURE) {
     'ARM64' { 'win-arm64' }
@@ -255,8 +240,8 @@ Write-Step "Target RID: $rid ($platform)"
 Write-Step "Install to: $InstallDir"
 
 if (-not $SkipPublish) {
-    # Check before the (slow) publish so a locked folder fails in seconds rather
-    # than after a full self-contained build.
+    # Ask before the (slow) publish, so the user is not left waiting through a
+    # full self-contained build before being prompted to close the app.
     Assert-InstallDirWritable -Path $ExePath -AutoStop:$StopRunning
 
     Write-Step "Publishing self-contained ($Configuration)..."
