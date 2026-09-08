@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using Searchlight.Abstractions;
 using Searchlight.Models;
 using Searchlight.Services;
+using Searchlight.Diagnostics;
 
 namespace Searchlight.ViewModels;
 
@@ -14,14 +15,17 @@ namespace Searchlight.ViewModels;
 /// </summary>
 public sealed partial class DetailsViewModel : ObservableObject
 {
-    private readonly ISessionDataSource _dataSource;
+    private readonly SessionDetailsLoader _loader;
     private readonly IResumeLauncher _resume;
     private readonly IClipboardService _clipboard;
+    private SessionInfo? _requested;
+    private CancellationTokenSource? _loadCancellation;
+    private int _generation;
 
     /// <summary>Creates a details view-model bound to the data source, resume launcher, and clipboard.</summary>
     public DetailsViewModel(ISessionDataSource dataSource, IResumeLauncher resume, IClipboardService clipboard)
     {
-        _dataSource = dataSource;
+        _loader = new SessionDetailsLoader(dataSource);
         _resume = resume;
         _clipboard = clipboard;
     }
@@ -59,40 +63,97 @@ public sealed partial class DetailsViewModel : ObservableObject
     [ObservableProperty]
     private string? _lastActionText = "Initializing...";
 
+    /// <summary>True while the selected session's details are being read off-thread.</summary>
+    [ObservableProperty]
+    private bool _isLoading;
+
+    /// <summary>The pending selection load; also lets headless callers await completion.</summary>
+    public Task CurrentLoad { get; private set; } = Task.CompletedTask;
+
     /// <summary>
     /// Loads and enriches the given session into the pane. Passing null clears it.
     /// </summary>
-    public void Load(SessionInfo? session)
+    public void Load(SessionInfo? session, bool refresh = false)
     {
-        StatusMessage = null;
-        Checkpoints.Clear();
-        Snapshots.Clear();
-        Todos.Clear();
-
-        if (session is null)
+        if (!refresh && ReferenceEquals(_requested, session))
         {
-            Session = null;
+            if (session is not null && Session is not null)
+            {
+                Session = Session with { CustomName = session.CustomName, IsPinned = session.IsPinned, HasNote = session.HasNote };
+                // Row overrides are mutable; the record may already compare equal
+                // after a rename, but headline bindings must still see that change.
+                OnPropertyChanged(nameof(Session));
+            }
             return;
         }
 
-        // Lazily parse events.jsonl only when needed for this session.
-        SessionInfo enriched = _dataSource.EnrichWithEvents(session);
-        Session = enriched;
-
-        foreach (CheckpointInfo checkpoint in _dataSource.ReadCheckpoints(enriched))
+        int generation = ++_generation;
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+        _loadCancellation = null;
+        bool changed = _requested?.Id != session?.Id || _requested?.FolderPath != session?.FolderPath;
+        _requested = session;
+        if (changed || session is null)
         {
-            Checkpoints.Add(checkpoint);
+            StatusMessage = null;
+            Checkpoints.Clear();
+            Snapshots.Clear();
+            Todos.Clear();
+            Session = session;
         }
 
-        foreach (SnapshotInfo snapshot in _dataSource.LoadSnapshots(enriched.Id))
+        if (session is null)
         {
-            Snapshots.Add(snapshot);
+            IsLoading = false;
+            CurrentLoad = Task.CompletedTask;
+            return;
         }
 
-        foreach (SessionTodo todo in _dataSource.ReadTodos(enriched))
+        // Load is called on the UI context. Only publication runs there; all
+        // filesystem/SQLite work, version checks and cache lookup run off-thread.
+        _loadCancellation = new CancellationTokenSource();
+        IsLoading = true;
+        CurrentLoad = LoadCoreAsync(session, generation, _loadCancellation.Token);
+    }
+
+    private async Task LoadCoreAsync(SessionInfo session, int generation, CancellationToken token)
+    {
+        try
         {
-            Todos.Add(todo);
+            SessionDetails details = await _loader.LoadAsync(session, token).ConfigureAwait(true);
+            if (generation != _generation || token.IsCancellationRequested) return;
+            Session = details.Session with
+            {
+                CustomName = session.CustomName,
+                IsPinned = session.IsPinned,
+                HasNote = session.HasNote,
+            };
+            ReplaceItems(Checkpoints, details.Checkpoints);
+            ReplaceItems(Snapshots, details.Snapshots);
+            ReplaceItems(Todos, details.Todos);
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (IOException ex)
+        {
+            if (generation == _generation) StatusMessage = $"Could not read session details: {ex.Message}";
+            CoreLog.Write($"Details load failed: {ex}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            if (generation == _generation) StatusMessage = $"Could not read session details: {ex.Message}";
+            CoreLog.Write($"Details load failed: {ex}");
+        }
+        finally
+        {
+            if (generation == _generation) IsLoading = false;
+        }
+    }
+
+    private static void ReplaceItems<T>(ObservableCollection<T> target, IReadOnlyList<T> items)
+    {
+        if (target.SequenceEqual(items)) return;
+        target.Clear();
+        foreach (T item in items) target.Add(item);
     }
 
     /// <summary>Resumes the current session via <c>copilot resume &lt;id&gt;</c>.</summary>

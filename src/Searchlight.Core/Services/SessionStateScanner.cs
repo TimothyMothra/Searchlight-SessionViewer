@@ -14,10 +14,21 @@ public sealed class SessionStateScanner
     private const string ChatPrefix = "optimistic-chat-";
 
     private readonly WorkspaceYamlReader _workspaceReader;
+    private readonly string _root;
+    private readonly object _cacheGate = new();
+    private readonly Dictionary<string, (SummaryVersion Version, SessionInfo Session)> _cache = [];
+
+    private readonly record struct SummaryVersion(long FolderTicks, FileVersion Workspace, FileVersion Checkpoints);
 
     /// <summary>Creates a scanner using the given workspace.yaml reader.</summary>
-    public SessionStateScanner(WorkspaceYamlReader workspaceReader) =>
+    public SessionStateScanner(WorkspaceYamlReader workspaceReader)
+        : this(workspaceReader, CopilotPaths.SessionState) { }
+
+    internal SessionStateScanner(WorkspaceYamlReader workspaceReader, string root)
+    {
         _workspaceReader = workspaceReader;
+        _root = root;
+    }
 
     /// <summary>
     /// Scans every session folder, newest first. Missing root yields an empty
@@ -25,23 +36,7 @@ public sealed class SessionStateScanner
     /// </summary>
     public IReadOnlyList<SessionInfo> Scan()
     {
-        if (!Directory.Exists(CopilotPaths.SessionState))
-        {
-            return [];
-        }
-
-        var results = new List<SessionInfo>();
-        foreach (string folderPath in Directory.EnumerateDirectories(CopilotPaths.SessionState))
-        {
-            SessionInfo? info = ScanFolder(folderPath);
-            if (info is not null)
-            {
-                results.Add(info);
-            }
-        }
-
-        results.Sort(static (a, b) => b.LastWriteTime.CompareTo(a.LastWriteTime));
-        return results;
+        return ScanCheap().Select(s => s.IsEnriched ? s : EnrichFolder(s)).ToArray();
     }
 
     /// <summary>
@@ -54,21 +49,29 @@ public sealed class SessionStateScanner
     /// </summary>
     public IReadOnlyList<SessionInfo> ScanCheap()
     {
-        if (!Directory.Exists(CopilotPaths.SessionState))
+        if (!Directory.Exists(_root))
         {
+            lock (_cacheGate) _cache.Clear();
             return [];
         }
 
         var results = new List<SessionInfo>();
-        foreach (string folderPath in Directory.EnumerateDirectories(CopilotPaths.SessionState))
+        var present = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string folder in Directory.EnumerateDirectories(_root))
         {
-            SessionInfo? info = ScanFolderCheap(folderPath);
+            SessionInfo? info = ScanFolderCheap(folder);
             if (info is not null)
             {
+                present.Add(info.FolderPath);
                 results.Add(info);
             }
         }
 
+        lock (_cacheGate)
+        {
+            foreach (string deleted in _cache.Keys.Where(k => !present.Contains(k)).ToArray())
+                _cache.Remove(deleted);
+        }
         results.Sort(static (a, b) => b.LastWriteTime.CompareTo(a.LastWriteTime));
         return results;
     }
@@ -100,8 +103,18 @@ public sealed class SessionStateScanner
             bool isChat = folderName.StartsWith(ChatPrefix, StringComparison.OrdinalIgnoreCase);
             string id = isChat ? folderName[ChatPrefix.Length..] : folderName;
 
-            var dirInfo = new DirectoryInfo(folderPath);
-            DateTimeOffset lastWrite = dirInfo.LastWriteTimeUtc;
+            // Query the directory itself: NTFS parent enumeration can report a
+            // stale timestamp immediately after a child file has been written.
+            DateTimeOffset lastWrite = new DirectoryInfo(folderPath).LastWriteTimeUtc;
+
+            lock (_cacheGate)
+            {
+                // Cold discovery needs no per-folder probes. Warm refreshes inspect
+                // versions, but only changed sessions reparse YAML/enumerate flags.
+                if (_cache.TryGetValue(folderPath, out var cached)
+                    && cached.Version == VersionFor(folderPath, lastWrite))
+                    return cached.Session;
+            }
 
             return new SessionInfo
             {
@@ -131,18 +144,41 @@ public sealed class SessionStateScanner
         try
         {
             string folderPath = session.FolderPath;
+            DateTimeOffset lastWrite = new DirectoryInfo(folderPath).LastWriteTimeUtc;
+            SummaryVersion version = VersionFor(folderPath, lastWrite);
+            lock (_cacheGate)
+            {
+                if (_cache.TryGetValue(folderPath, out var cached) && cached.Version == version)
+                    return cached.Session;
+            }
             WorkspaceMetadata? workspace = _workspaceReader.Read(folderPath);
 
-            return session with
+            // One directory enumeration replaces separate lock/plan enumerations
+            // and events/database existence probes.
+            bool inUse = false, plan = false, database = false, events = false;
+            foreach (string file in Directory.EnumerateFiles(folderPath))
             {
+                string name = Path.GetFileName(file);
+                inUse |= name.StartsWith("inuse.", StringComparison.OrdinalIgnoreCase)
+                    && name.EndsWith(".lock", StringComparison.OrdinalIgnoreCase);
+                plan |= name.StartsWith("plan", StringComparison.OrdinalIgnoreCase)
+                    && name.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+                database |= name.Equals("session.db", StringComparison.OrdinalIgnoreCase);
+                events |= name.Equals("events.jsonl", StringComparison.OrdinalIgnoreCase);
+            }
+            SessionInfo enriched = session with
+            {
+                LastWriteTime = lastWrite,
                 Workspace = workspace,
-                IsInUse = HasLockFile(folderPath),
-                HasPlan = HasPlanFile(folderPath),
-                HasSessionDb = File.Exists(CopilotPaths.SessionDb(folderPath)),
+                IsInUse = inUse,
+                HasPlan = plan,
+                HasSessionDb = database,
                 HasCheckpoints = HasCheckpointContent(folderPath),
-                HasEvents = File.Exists(CopilotPaths.EventsJsonl(folderPath)),
+                HasEvents = events,
                 IsEnriched = true,
             };
+            lock (_cacheGate) _cache[folderPath] = (version, enriched);
+            return enriched;
         }
         catch (Exception)
         {
@@ -150,33 +186,9 @@ public sealed class SessionStateScanner
         }
     }
 
-    private static bool HasLockFile(string folderPath)
-    {
-        try
-        {
-            return Directory
-                .EnumerateFiles(folderPath, "inuse.*.lock", SearchOption.TopDirectoryOnly)
-                .Any();
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
-
-    private static bool HasPlanFile(string folderPath)
-    {
-        try
-        {
-            return Directory
-                .EnumerateFiles(folderPath, "plan*.md", SearchOption.TopDirectoryOnly)
-                .Any();
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
+    private static SummaryVersion VersionFor(string folderPath, DateTimeOffset lastWrite) =>
+        new(lastWrite.UtcTicks, FileVersion.Read(CopilotPaths.WorkspaceYaml(folderPath)),
+            FileVersion.ReadDirectory(CopilotPaths.CheckpointsDir(folderPath)));
 
     private static bool HasCheckpointContent(string folderPath)
     {

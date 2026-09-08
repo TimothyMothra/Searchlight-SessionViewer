@@ -15,16 +15,24 @@ so every enrichment field degrades to empty/null rather than throwing.
 |-----------------------------|--------|----------------|------|
 | `session-state/<id>/` folders | `SessionStateScanner` | One base `SessionInfo` per folder: `Id`, `FolderName`, `FolderPath`, `Kind`, `LastWriteTime`, presence flags (`IsInUse` via `inuse.<PID>.lock`, `HasPlan`, `HasSessionDb`, `HasCheckpoints`, `HasEvents`) and `IsEnriched`. Splits `optimistic-chat-` prefix → `Chat`, else `Project`. | cheap (bulk) |
 | `session-state/<id>/workspace.yaml` | `WorkspaceYamlReader` | `WorkspaceMetadata` (name, cwd, `client_name`, created/updated, user-named, summary count, MC ids) via YamlDotNet. | cheap (bulk) |
-| `session-state/<id>/events.jsonl` | `EventsJsonlReader` | `SessionStartInfo` — head-parse only (≤ `MaxLines`): `session.start` baseline + latest `session.model_change` + first `user.message` preview. Full ~300 KB log never materialized. | heavy (lazy) |
+| `session-state/<id>/events.jsonl` | `EventsJsonlReader` | `SessionStartInfo` — UTF-8 preview bounded by 2,000 lines and 8 MiB input, with individual events over 1 MiB skipped: `session.start` baseline + latest in-window `session.model_change` + first in-window `user.message` preview. Documents are disposed without cloning; the complete log is never materialized. Limit hits are logged. | heavy (lazy, cached) |
 | `status-snapshots/index.db` (table `snapshots`) | `SnapshotIndexReader` | Branch + snapshot count per session (bulk index scan); `SnapshotInfo` rows on demand. Read-only SQLite. | cheap bulk / heavy detail |
 | `journal/<YYYY-MM>.md` | `JournalReader` | `JournalEntry` rows from the pipe table `\| time \| session_id \| branch \| cwd \| activity \|`; last row wins per session → `JournalActivity`. | cheap (bulk) |
 | `session-state/<id>/checkpoints/NNN-title.md` + `index.md` | `CheckpointsReader` | `CheckpointInfo` list; prefers the fuller title from `index.md`'s table over the truncated file name. | heavy (lazy) |
 | `session-state/<id>/session.db` (tables `todos`, `session_state`) | `SessionDbReader` | `SessionTodo` list + session-state key/values. Read-only SQLite. | heavy (lazy) |
 
-**Two-tier loading.** `SessionAggregator` / `LiveSessionDataSource` run a cheap **bulk pass**
-(`LoadAll` = folder scan + workspace.yaml + bulk snapshot-index + journal) across *all* sessions, then
-defer the **heavy per-session** reads (events head-parse, checkpoints, snapshots, todos) to selection.
-This keeps ~500-folder scans responsive.
+**Summary/detail split.** The UI uses `LoadCheap` to discover all folders and reuse versioned
+summaries. It enriches the newest **30** sessions plus all pins and the selection before first
+publication, then loads remaining summaries in **30-row batches**. This preserves catalog-wide
+name/folder/branch search without preloading event content. Note-presence is indexed once per
+refresh rather than probing the filesystem during search.
+
+Events, checkpoints, snapshots and todos load asynchronously on selection. A versioned,
+eight-entry LRU cache retains recently selected details, including empty results, without
+accumulating details for every visited session. File length/last-write time and database WAL
+versions are used for invalidation; unchanged filtering does not even recheck these files.
+The details pane does not load unused `session_state` values. See
+[architecture.md](./architecture.md) for refresh, cancellation and cache assumptions.
 
 ---
 

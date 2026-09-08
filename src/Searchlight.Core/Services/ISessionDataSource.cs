@@ -15,9 +15,9 @@ public interface ISessionDataSource
     IReadOnlyList<SessionInfo> LoadAll();
 
     /// <summary>
-    /// Fast first pass: cheap placeholder rows for every session (id/folder/kind/
-    /// mtime only, sorted newest-first), with no yaml parse or bulk enrichment.
-    /// Each row must be upgraded via <see cref="EnrichOne"/> before display.
+    /// Catalog pass: cached summaries for unchanged sessions, otherwise cheap
+    /// placeholders (id/folder/kind/mtime), sorted newest-first. Only placeholders
+    /// need upgrading via <see cref="EnrichOne"/>; live sources refresh bulk maps.
     /// </summary>
     IReadOnlyList<SessionInfo> LoadCheap();
 
@@ -39,4 +39,10 @@ public interface ISessionDataSource
 
     /// <summary>Todos read from the given session's store.</summary>
     IReadOnlyList<SessionTodo> ReadTodos(SessionInfo session);
+
+    /// <summary>
+    /// Version of detail inputs, checked on a worker when selecting or refreshing.
+    /// In-memory sources are immutable unless they override this value.
+    /// </summary>
+    string GetDetailsVersion(SessionInfo session) => string.Empty;
 }

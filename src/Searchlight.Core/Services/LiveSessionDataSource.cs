@@ -50,5 +50,17 @@ public sealed class LiveSessionDataSource : ISessionDataSource
 
     /// <inheritdoc />
     public IReadOnlyList<SessionTodo> ReadTodos(SessionInfo session) =>
-        _sessionDb.Read(session.FolderPath).Todos;
+        _sessionDb.ReadTodos(session.FolderPath);
+
+    /// <inheritdoc />
+    public string GetDetailsVersion(SessionInfo session) => string.Join("|",
+        FileVersion.ReadDirectory(session.FolderPath),
+        FileVersion.Read(CopilotPaths.WorkspaceYaml(session.FolderPath)),
+        FileVersion.Read(CopilotPaths.EventsJsonl(session.FolderPath)),
+        FileVersion.Read(CopilotPaths.SessionDb(session.FolderPath)),
+        FileVersion.Read(CopilotPaths.SessionDb(session.FolderPath) + "-wal"),
+        FileVersion.ReadDirectory(CopilotPaths.CheckpointsDir(session.FolderPath)),
+        FileVersion.Read(Path.Combine(CopilotPaths.CheckpointsDir(session.FolderPath), "index.md")),
+        FileVersion.Read(CopilotPaths.SnapshotIndexDb),
+        FileVersion.Read(CopilotPaths.SnapshotIndexDb + "-wal"));
 }

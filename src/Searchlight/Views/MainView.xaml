@@ -489,6 +489,11 @@
 
                     <ScrollViewer Grid.Row="1" Padding="20,0,20,16">
                         <StackPanel Spacing="16">
+                            <!-- Detail reads are asynchronous; list navigation and
+                                 resume remain available while this indicator is shown. -->
+                            <TextBlock Text="Loading session details..."
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Visibility="{x:Bind ViewModel.Details.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
                         <!-- Fields -->
                         <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"

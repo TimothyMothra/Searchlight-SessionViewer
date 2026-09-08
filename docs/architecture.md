@@ -134,17 +134,36 @@ manually (double-dispose). See `App.ExitApplication`.
                                                         Details pane + Resume button
 ```
 
-**Two-tier loading (performance):**
+**Summary and detail loading (performance):**
 
-- **Bulk (`LoadAll`)** — folder scan + `workspace.yaml` + bulk snapshot/journal enrichment. This is
-  cheap and runs for *every* session so the list appears fast even with hundreds of folders.
-- **Lazy (per selection)** — `events.jsonl` head-parse (bounded to a max number of leading lines),
-  checkpoints, snapshots, and `session.db` todos are only read when a row is selected. This keeps a
-  500-folder scan responsive.
+- **Catalog (`LoadCheap`)** discovers all folders and refreshes snapshot/journal summaries.
+  Unchanged session summaries are reused from an in-memory cache. Folder timestamps, workspace
+  timestamps/lengths, and checkpoint-directory timestamps invalidate changed summaries; deleted
+  folders are evicted. The cache is not persisted to Copilot's data directory.
+- **First publication** enriches the newest **30** rows plus every pin and the current selection.
+  Remaining missing summaries load in **30-row batches**, with indexed row lookup and one update
+  per affected group per batch. Names, folders, branches and dates remain searchable across the
+  entire catalog once this background pass completes; heavy details are not prefetched.
+- **Filtering** uses in-memory metadata and a note-presence index loaded once per refresh.
+  Unchanged groups/rows are retained, and filtering an unchanged selection does not reload details.
+- **Details** load asynchronously through `SessionDetailsLoader`, with a serial worker and an
+  **eight-entry LRU cache**. Event/database/WAL/workspace/checkpoint/snapshot versions are checked
+  on selection or explicit refresh. Inputs that change during a read are not cached. Superseded
+  selections cancel queued work and cannot publish stale results. Resume/copy remain available
+  while details load. Only todos, not unused `session_state` values, are read for this pane.
+- **Event previews** are UTF-8, bounded to 2,000 lines / 8 MiB input / 1 MiB per event.
+  Oversized events are skipped through the next line boundary; budget hits are logged. The parser
+  uses pooled buffers and disposes each JSON document without cloning it. These limits bound a
+  preview, not a complete transcript or a claim about the model after the scanned window.
+- **Diagnostics** distinguish first publication from full summary completion. The footer's
+  `Loaded N sessions in Xs` covers all summary batches, not just first display or detail completion.
 
 **Live refresh:** `SessionWatcher` wraps a `FileSystemWatcher` on `~/.copilot/session-state` and
-raises a single **debounced** `Changed` event. `MainViewModel` hooks it after the first load and
-re-loads through the `IUiDispatcher` so list updates marshal back onto the UI thread.
+raises a single **debounced** `Changed` event for structural session/lock changes. `MainViewModel`
+hooks it after first publication. Requests arriving during enrichment coalesce into one follow-up
+pass instead of repeatedly abandoning work. A catalog refresh still discovers every folder, but
+only changed summaries are reparsed. External note edits and detail content changes are observed
+on refresh (detail content is also checked when reselected).
 
 ---
 
@@ -152,8 +171,8 @@ re-loads through the `IUiDispatcher` so list updates marshal back onto the UI th
 
 - **UI thread:** captured in `OnLaunched` via `DispatcherQueue.GetForCurrentThread()`, wrapped in
   `DispatcherQueueUiDispatcher : IUiDispatcher`.
-- **Heavy loads:** `MainViewModel.LoadAsync` does `await Task.Run(() => _dataSource.LoadAll())` so
-  the disk/SQLite/YAML work runs on the thread pool.
+- **Heavy loads:** catalog, note-index, summary batches and detail reads run on the thread pool.
+  View-model continuations capture the UI synchronization context to publish bound collections.
 - **Marshalling back:** the watcher and any background continuation post UI updates through
   `IUiDispatcher.Post`, keeping `ObservableCollection` mutations on the UI thread.
 - **In tests:** the test project supplies a synchronous `InlineUiDispatcher` (`Post(a) => a()`), so

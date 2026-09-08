@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Searchlight.Diagnostics;
 
 namespace Searchlight.Services;
 
@@ -138,6 +139,32 @@ public sealed class NotesService
         catch (Exception)
         {
             return false;
+        }
+    }
+
+    /// <summary>Loads note-presence once per refresh, never once per search result.</summary>
+    public IReadOnlySet<string> LoadNoteIds()
+    {
+        if (_dir is null)
+            return new HashSet<string>(_memory.Keys, StringComparer.Ordinal);
+
+        try
+        {
+            return Directory.Exists(_dir)
+                ? Directory.EnumerateFiles(_dir, "*.md", SearchOption.TopDirectoryOnly)
+                    .Select(Path.GetFileNameWithoutExtension).OfType<string>()
+                    .ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+        }
+        catch (IOException ex)
+        {
+            CoreLog.Write($"Note index unavailable: {ex.Message}");
+            throw;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            CoreLog.Write($"Note index unavailable: {ex.Message}");
+            throw;
         }
     }
 

@@ -23,6 +23,7 @@ public sealed class SessionAggregator
     private IReadOnlyDictionary<string, SnapshotSummary>? _snapshotCache;
     private IReadOnlyDictionary<string, JournalEntry>? _journalCache;
     private bool _bulkLoaded;
+    private readonly object _bulkGate = new();
 
     /// <summary>Creates an aggregator over the given readers.</summary>
     public SessionAggregator(
@@ -64,13 +65,25 @@ public sealed class SessionAggregator
     }
 
     /// <summary>
-    /// Fast first pass: placeholder rows for every session folder, newest first,
-    /// with NO <c>workspace.yaml</c> parse, NO presence-flag sub-enumeration, and
-    /// NO bulk snapshot/journal enrichment. Each returned row must be upgraded
-    /// later via <see cref="EnrichOne"/>. Lets the UI publish all rows in a few
-    /// hundred milliseconds instead of ~2 seconds.
+    /// Catalog pass: refresh bulk maps and discover every folder, reusing unchanged
+    /// summaries. Only rows with IsEnriched=false need a subsequent EnrichOne call.
     /// </summary>
-    public IReadOnlyList<SessionInfo> LoadCheap() => _scanner.ScanCheap();
+    public IReadOnlyList<SessionInfo> LoadCheap()
+    {
+        // A refresh must also observe new/removed bulk metadata, not retain the
+        // first snapshot/journal maps for the lifetime of the singleton.
+        var snapshots = _snapshotReader.LoadSummaries();
+        var journal = _journalReader.LoadLatestBySession();
+        lock (_bulkGate)
+        {
+            _snapshotCache = snapshots;
+            _journalCache = journal;
+            _bulkLoaded = true;
+        }
+        return _scanner.ScanCheap()
+            .Select(s => s.IsEnriched ? ApplyBulkEnrichment(s, snapshots, journal) : s)
+            .ToArray();
+    }
 
     /// <summary>
     /// Fully enriches a single cheap placeholder (from <see cref="LoadCheap"/>):
@@ -83,15 +96,22 @@ public sealed class SessionAggregator
     /// </summary>
     public SessionInfo EnrichOne(SessionInfo session)
     {
-        if (!_bulkLoaded)
+        IReadOnlyDictionary<string, SnapshotSummary> snapshots;
+        IReadOnlyDictionary<string, JournalEntry> journal;
+        lock (_bulkGate)
         {
-            _snapshotCache = _snapshotReader.LoadSummaries();
-            _journalCache = _journalReader.LoadLatestBySession();
-            _bulkLoaded = true;
+            if (!_bulkLoaded)
+            {
+                _snapshotCache = _snapshotReader.LoadSummaries();
+                _journalCache = _journalReader.LoadLatestBySession();
+                _bulkLoaded = true;
+            }
+            snapshots = _snapshotCache!;
+            journal = _journalCache!;
         }
 
         SessionInfo enriched = _scanner.EnrichFolder(session);
-        return ApplyBulkEnrichment(enriched, _snapshotCache!, _journalCache!);
+        return ApplyBulkEnrichment(enriched, snapshots, journal);
     }
 
     /// <summary>
@@ -115,20 +135,17 @@ public sealed class SessionAggregator
         IReadOnlyDictionary<string, SnapshotSummary> snapshots,
         IReadOnlyDictionary<string, JournalEntry> journal)
     {
-        string? branch = session.Branch;
-        int snapshotCount = session.SnapshotCount;
-        if (snapshots.TryGetValue(session.Id, out SnapshotSummary? summary))
-        {
-            branch ??= summary.LatestBranch;
-            snapshotCount = summary.Count;
-        }
+        // These projections belong to the current bulk maps, not an older cached
+        // row. Removed snapshots/journal entries must also clear stale values.
+        snapshots.TryGetValue(session.Id, out SnapshotSummary? summary);
+        journal.TryGetValue(session.Id, out JournalEntry? entry);
+        string? branch = summary?.LatestBranch ?? entry?.Branch;
+        int snapshotCount = summary?.Count ?? 0;
+        string? journalActivity = entry?.Activity;
 
-        string? journalActivity = session.JournalActivity;
-        if (journal.TryGetValue(session.Id, out JournalEntry? entry))
-        {
-            journalActivity ??= entry.Activity;
-            branch ??= entry.Branch;
-        }
+        if (session.Branch == branch && session.SnapshotCount == snapshotCount
+            && session.JournalActivity == journalActivity)
+            return session;
 
         return session with
         {

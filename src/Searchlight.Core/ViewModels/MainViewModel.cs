@@ -25,8 +25,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly List<SessionInfo> _all = [];
     private readonly HashSet<string> _pinnedIds = [];
     private readonly Dictionary<string, string> _customNames = [];
+    private readonly Dictionary<string, int> _rowIndices = [];
+    private readonly Dictionary<string, (SessionGroup Group, int Index)> _visibleRows = [];
+    private HashSet<string> _notedIds = [];
     private bool _watcherHooked;
     private bool _suppressSelectionSideEffects;
+    private Task? _activeLoad;
+    private bool _reloadRequested;
+    private readonly CancellationTokenSource _lifetime = new();
 
     // Notes state. _notesSessionId is the id whose note is currently loaded into
     // SelectedNotes; _suppressNotesSave gates the autosave while we load a note
@@ -39,12 +45,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _notesDirty;
     private CancellationTokenSource? _notesDebounceCts;
 
-    // Fixed "visible + buffer" window enriched synchronously before the first paint.
-    // A generous proxy for the on-screen rows (not viewport-measured); the rest fill
-    // in asynchronously. Monotonic generation cancels stale background enrichment when
-    // a newer load/refresh starts.
-    private const int EagerEnrichCount = 60;
-    private int _loadGeneration;
+    // ASSUMPTION: 30 recent rows cover a screenful plus buffer. All pins and the
+    // selection are additional priorities, even when older than this window.
+    internal const int EagerEnrichCount = 30;
+    internal const int EnrichmentBatchSize = 30;
 
     /// <summary>Creates the main view-model with its services and UI dispatcher.</summary>
     public MainViewModel(
@@ -88,7 +92,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (e.PropertyName is nameof(AppSettings.HideEmptySessions)
             or nameof(AppSettings.HideUnnamedSessions))
         {
-            ApplyFilter();
+            ApplyFilter(refreshRows: true);
         }
     }
 
@@ -236,7 +240,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (SelectedSession is not null && SelectedSession.HasNote != hasNow)
         {
             SelectedSession.HasNote = hasNow;
-            ApplyFilter();
+            if (hasNow) _notedIds.Add(SelectedSession.Id);
+            else _notedIds.Remove(SelectedSession.Id);
+            ApplyFilter(refreshRows: true);
         }
     }
 
@@ -260,134 +266,110 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     partial void OnSearchTextChanged(string value) => ApplyFilter();
 
     /// <summary>
-    /// Two-phase load. Phase 1 (blocking, fast): read cheap folder facts for every
-    /// session, eagerly enrich the newest <see cref="EagerEnrichCount"/> window, and
-    /// publish immediately so the first screenful renders fully. Phase 2 (background):
-    /// enrich the remaining sessions in recency order, yielding periodically and
-    /// updating each row in place on the UI thread. A generation guard cancels an
-    /// in-flight Phase 2 when a newer load/refresh starts. Also wires the watcher.
+    /// Publishes pins and the recent window first, then fills missing searchable
+    /// summaries in bounded batches. Concurrent refresh requests coalesce into a
+    /// follow-up pass rather than repeatedly abandoning unfinished enrichment.
     /// </summary>
     [RelayCommand]
-    private async Task LoadAsync()
+    private Task LoadAsync()
     {
-        CoreLog.Write("LoadAsync: start");
-        int generation = ++_loadGeneration;
+        if (_lifetime.IsCancellationRequested) return Task.CompletedTask;
+        if (_activeLoad is { IsCompleted: false })
+        {
+            _reloadRequested = true;
+            return _activeLoad;
+        }
 
-        // Time the whole load through to the end of background enrichment ("fully
-        // loaded"). The elapsed value is written to the footer status once, last-one-wins,
-        // so it shows at startup but is replaced by the next copy/resume action.
-        Stopwatch loadStopwatch = Stopwatch.StartNew();
+        return _activeLoad = LoadUntilCurrentAsync();
+    }
+
+    private async Task LoadUntilCurrentAsync()
+    {
         IsLoading = true;
         try
         {
-            // Phase 1a: cheap placeholders (folder facts only) — fast blocking pass.
-            IReadOnlyList<SessionInfo> cheap =
-                await Task.Run(() => _dataSource.LoadCheap()).ConfigureAwait(true);
-
-            CoreLog.Write($"LoadAsync: data source returned {cheap.Count} sessions (cheap)");
-
-            // Phase 1b: eagerly enrich the newest window so the first screenful is
-            // fully populated before we publish.
-            List<SessionInfo> initial = [.. cheap];
-            int eager = Math.Min(EagerEnrichCount, initial.Count);
-            await Task.Run(() =>
+            do
             {
-                for (int i = 0; i < eager; i++)
+                _reloadRequested = false;
+                CoreLog.Write("LoadAsync: start");
+                Stopwatch loadStopwatch = Stopwatch.StartNew();
+                CancellationToken token = _lifetime.Token;
+                var loaded = await Task.Run(() =>
                 {
-                    initial[i] = _dataSource.EnrichOne(initial[i]);
+                    token.ThrowIfCancellationRequested();
+                    return (Sessions: _dataSource.LoadCheap(), Notes: _notes.LoadNoteIds());
+                }, token).ConfigureAwait(true);
+                token.ThrowIfCancellationRequested();
+                _notedIds = new(loaded.Notes);
+                CoreLog.Write($"LoadAsync: data source returned {loaded.Sessions.Count} sessions (cached {loaded.Sessions.Count(s => s.IsEnriched)})");
+
+                List<SessionInfo> initial = [.. loaded.Sessions];
+                HashSet<string> priorities = initial.Take(EagerEnrichCount).Select(s => s.Id).ToHashSet();
+                priorities.UnionWith(_pinnedIds);
+                if (SelectedSession is not null) priorities.Add(SelectedSession.Id);
+                // Snapshot mutable UI-owned pin state before entering the worker.
+                HashSet<string> pins = [.. _pinnedIds];
+                int[] eagerIndices = Enumerable.Range(0, initial.Count)
+                    .Where(i => priorities.Contains(initial[i].Id) && !initial[i].IsEnriched)
+                    .OrderByDescending(i => pins.Contains(initial[i].Id)).ToArray();
+                await Task.Run(() =>
+                {
+                    foreach (int i in eagerIndices)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        initial[i] = _dataSource.EnrichOne(initial[i]);
+                    }
+                }, token).ConfigureAwait(true);
+                token.ThrowIfCancellationRequested();
+
+                var previous = _all.ToDictionary(s => s.Id);
+                _all.Clear();
+                _rowIndices.Clear();
+                foreach (SessionInfo input in initial)
+                {
+                    SessionInfo row = PrepareRow(input);
+                    // Preserve unchanged record identities, bindings and selection.
+                    SessionInfo current = previous.TryGetValue(row.Id, out var old) && old == row ? old : row;
+                    _rowIndices[current.Id] = _all.Count;
+                    _all.Add(current);
                 }
-            }).ConfigureAwait(true);
+                TotalCount = _all.Count;
+                ApplyFilter();
+                CoreLog.Write($"LoadAsync: published {VisibleCount} rows in {SessionGroups.Count} groups (total {TotalCount}, eager {eagerIndices.Length}) in {loadStopwatch.Elapsed.TotalSeconds:0.00}s");
+                HookWatcher();
 
-            _all.Clear();
-            _all.AddRange(initial);
-            TotalCount = _all.Count;
-            ApplyFilter();
-            CoreLog.Write($"LoadAsync: published {VisibleCount} rows in {SessionGroups.Count} groups (total {TotalCount}, eager {eager})");
-
-            // Phase 2: enrich the rest in the background, updating rows in place.
-            if (initial.Count > eager)
-            {
-                EnrichRemainingInBackground(generation, eager, loadStopwatch);
-            }
-            else
-            {
-                // No background phase — this load is already "fully loaded".
+                SessionInfo[] pending = _all.Where(s => !s.IsEnriched).ToArray();
+                foreach (SessionInfo[] batch in pending.Chunk(EnrichmentBatchSize))
+                {
+                    SessionInfo[] enriched = await Task.Run(() => batch.Select(s =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        return _dataSource.EnrichOne(s);
+                    }).ToArray(), token).ConfigureAwait(true);
+                    token.ThrowIfCancellationRequested();
+                    ReplaceRows(enriched);
+                }
+                CoreLog.Write($"LoadAsync: background enrichment complete ({pending.Length} rows, {(pending.Length + EnrichmentBatchSize - 1) / EnrichmentBatchSize} batches)");
+                ApplyFilter();
+                Details.Load(SelectedSession, refresh: true);
                 ReportLoadTime(loadStopwatch);
-            }
+            } while (_reloadRequested && !_lifetime.IsCancellationRequested);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (IOException ex)
         {
-            CoreLog.Write($"LoadAsync: EXCEPTION {ex}");
+            CoreLog.Write($"LoadAsync: I/O failure {ex}");
+            Details.LastActionText = $"Could not load sessions: {ex.Message}";
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            CoreLog.Write($"LoadAsync: access failure {ex}");
+            Details.LastActionText = $"Could not load sessions: {ex.Message}";
         }
         finally
         {
             IsLoading = false;
         }
-
-        HookWatcher();
-    }
-
-    /// <summary>
-    /// Enriches sessions beyond the eager window on a background thread, in recency
-    /// order, marshaling each completed row back to the UI thread. Yields between
-    /// batches so posted row updates render progressively rather than in one burst.
-    /// Bails out as soon as a newer load supersedes this <paramref name="generation"/>.
-    /// </summary>
-    private void EnrichRemainingInBackground(int generation, int startIndex, Stopwatch loadStopwatch)
-    {
-        // Snapshot the pending placeholders on the UI thread before going async.
-        List<SessionInfo> pending = [.. _all.Skip(startIndex)];
-
-        _ = Task.Run(async () =>
-        {
-            const int BatchSize = 20;
-            int done = 0;
-            try
-            {
-                foreach (SessionInfo placeholder in pending)
-                {
-                    if (generation != _loadGeneration)
-                    {
-                        return;
-                    }
-
-                    SessionInfo enriched = _dataSource.EnrichOne(placeholder);
-                    _dispatcher.Post(() =>
-                    {
-                        if (generation == _loadGeneration)
-                        {
-                            ReplaceRow(enriched);
-                        }
-                    });
-
-                    if (++done % BatchSize == 0)
-                    {
-                        await Task.Yield();
-                    }
-                }
-
-                CoreLog.Write($"LoadAsync: background enrichment complete ({done} rows)");
-
-                // Phase 1 grouped the older rows by folder mtime (the cheap sort key),
-                // which can be bulk-touched and wildly diverge from workspace updated_at.
-                // Now that every row carries its real updated_at, recompute the groups
-                // once so day/week/month buckets are accurate. Guarded by generation so
-                // a newer load (Refresh) doesn't get clobbered by this late recompute.
-                _dispatcher.Post(() =>
-                {
-                    if (generation == _loadGeneration)
-                    {
-                        ApplyFilter();
-                        CoreLog.Write($"LoadAsync: regrouped after enrichment ({SessionGroups.Count} groups)");
-                        ReportLoadTime(loadStopwatch);
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                CoreLog.Write($"LoadAsync: background enrichment EXCEPTION {ex}");
-            }
-        });
     }
 
     /// <summary>
@@ -409,53 +391,48 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// ordering stays stable while off-screen rows fill in. Refreshes the details
     /// pane if the enriched row is the current selection.
     /// </summary>
-    private void ReplaceRow(SessionInfo enriched)
+    private void ReplaceRows(IReadOnlyList<SessionInfo> rows)
     {
-        // Enrichment builds a fresh record; carry the transient pin flag and custom
-        // name forward so a pinned/renamed row isn't visually reset on enrich.
-        enriched.IsPinned = _pinnedIds.Contains(enriched.Id);
-        enriched.CustomName = _customNames.GetValueOrDefault(enriched.Id);
-
-        for (int i = 0; i < _all.Count; i++)
+        _suppressSelectionSideEffects = true;
+        try
         {
-            if (_all[i].Id == enriched.Id)
+            var changedGroups = new Dictionary<SessionGroup, List<SessionInfo>>();
+            foreach (SessionInfo input in rows)
             {
-                _all[i] = enriched;
-                break;
-            }
-        }
-
-        foreach (SessionGroup group in SessionGroups)
-        {
-            for (int i = 0; i < group.Count; i++)
-            {
-                if (group[i].Id == enriched.Id)
+                SessionInfo row = PrepareRow(input);
+                if (_rowIndices.TryGetValue(row.Id, out int index)) _all[index] = row;
+                if (_visibleRows.TryGetValue(row.Id, out var position))
                 {
-                    bool isSelected = SelectedSession?.Id == enriched.Id;
-
-                    _suppressSelectionSideEffects = true;
-                    try
+                    if (!changedGroups.TryGetValue(position.Group, out var items))
                     {
-                        group[i] = enriched;
-                        if (isSelected)
-                        {
-                            SelectedSession = enriched;
-                        }
+                        items = [.. position.Group];
+                        changedGroups[position.Group] = items;
                     }
-                    finally
-                    {
-                        _suppressSelectionSideEffects = false;
-                    }
-
-                    if (isSelected)
-                    {
-                        Details.Load(enriched);
-                    }
-
-                    return;
+                    items[position.Index] = row;
                 }
             }
+            string? keepId = SelectedSession?.Id;
+            foreach (var (group, items) in changedGroups) group.SetItems(items);
+            if (keepId is not null && _rowIndices.TryGetValue(keepId, out int selectedIndex))
+                SelectedSession = _all[selectedIndex];
         }
+        finally
+        {
+            _suppressSelectionSideEffects = false;
+        }
+        Details.Load(SelectedSession);
+    }
+
+    private SessionInfo PrepareRow(SessionInfo row)
+    {
+        bool pinned = _pinnedIds.Contains(row.Id);
+        string? customName = _customNames.GetValueOrDefault(row.Id);
+        bool hasNote = row.Id == _notesSessionId
+            ? !string.IsNullOrWhiteSpace(SelectedNotes) : _notedIds.Contains(row.Id);
+        // Cached summary objects may already be bound. A changed flag needs a new
+        // row identity so one-time item-template bindings get refreshed.
+        return row.IsPinned == pinned && row.CustomName == customName && row.HasNote == hasNote
+            ? row : row with { IsPinned = pinned, CustomName = customName, HasNote = hasNote };
     }
 
     /// <summary>Re-runs <see cref="LoadAsync"/> to pick up on-disk changes.</summary>
@@ -553,7 +530,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         PersistCustomNames();
-        ApplyFilter();
+        ApplyFilter(refreshRows: true);
     }
 
     /// <summary>
@@ -570,7 +547,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         PersistCustomNames();
-        ApplyFilter();
+        ApplyFilter(refreshRows: true);
     }
 
     // Reassign the settings dictionary (never mutate in place) so SettingsService's
@@ -594,14 +571,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // FileSystemWatcher/timer fire on thread-pool threads; marshal to UI.
         _dispatcher.Post(() =>
         {
-            if (!RefreshCommand.IsRunning)
-            {
-                RefreshCommand.Execute(null);
-            }
+            _ = LoadAsync();
         });
     }
 
-    private void ApplyFilter()
+    private void ApplyFilter(bool refreshRows = false)
     {
         string query = SearchText?.Trim() ?? string.Empty;
 
@@ -632,15 +606,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // workspace updated_at diverges from the folder last-write sort key.
         List<SessionInfo> ordered = [.. filtered.OrderByDescending(s => s.UpdatedAt)];
 
-        // Recompute the note-presence flag so the notes badge stays in sync. Unlike
-        // the pin/name flags above this probes disk per session, so it is confined to
-        // the rows that survived filtering. For the currently-loaded session use the
-        // live editor text (the disk write is debounced and may lag); others read disk.
+        // Filtering is entirely in memory. External note edits are observed by the
+        // next refresh; the selected editor's pending text always wins.
         foreach (SessionInfo session in ordered)
         {
             session.HasNote = string.Equals(session.Id, _notesSessionId, StringComparison.Ordinal)
                 ? !string.IsNullOrWhiteSpace(SelectedNotes)
-                : _notes.HasNote(session.Id);
+                : _notedIds.Contains(session.Id);
         }
 
         string? keepId = SelectedSession?.Id;
@@ -650,7 +622,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _suppressSelectionSideEffects = true;
         try
         {
-            SessionGroups.Clear();
+            List<SessionGroup> desiredGroups = [];
 
             // Pinned sessions float to the top in their own group (newest-first),
             // and are excluded from the recency buckets below so they appear once.
@@ -663,7 +635,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     pinnedGroup.Add(session);
                 }
 
-                SessionGroups.Add(pinnedGroup);
+                desiredGroups.Add(pinnedGroup);
             }
 
             DateTimeOffset now = DateTimeOffset.Now;
@@ -681,13 +653,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 if (current is null || !string.Equals(key, currentKey, StringComparison.Ordinal))
                 {
                     current = new SessionGroup(key, shortKey);
-                    SessionGroups.Add(current);
+                    desiredGroups.Add(current);
                     currentKey = key;
                 }
 
                 current.Add(session);
             }
 
+            ReconcileGroups(desiredGroups, refreshRows);
             VisibleCount = ordered.Count;
 
             // Preserve selection across a filter/refresh when the row survives.
@@ -707,6 +680,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RenameDraft = SelectedSession?.DisplayName ?? string.Empty;
         ReconcileNotesSelection();
         Details.Load(SelectedSession);
+    }
+
+    private void ReconcileGroups(IReadOnlyList<SessionGroup> desired, bool refreshRows)
+    {
+        for (int i = 0; i < desired.Count; i++)
+        {
+            SessionGroup target = desired[i];
+            SessionGroup? existing = SessionGroups.FirstOrDefault(g =>
+                g.Key == target.Key && g.ShortKey == target.ShortKey);
+            if (existing is null)
+            {
+                SessionGroups.Insert(i, target);
+            }
+            else
+            {
+                int oldIndex = SessionGroups.IndexOf(existing);
+                if (oldIndex != i) SessionGroups.Move(oldIndex, i);
+                existing.SetItems(target, refreshRows);
+            }
+        }
+        while (SessionGroups.Count > desired.Count) SessionGroups.RemoveAt(SessionGroups.Count - 1);
+        _visibleRows.Clear();
+        foreach (SessionGroup group in SessionGroups)
+            for (int i = 0; i < group.Count; i++) _visibleRows[group[i].Id] = (group, i);
     }
 
     // Loads the note for the current selection into SelectedNotes, first flushing
@@ -920,6 +917,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Detaches the watcher and settings events.</summary>
     public void Dispose()
     {
+        _lifetime.Cancel();
+        Details.Load(null);
         // Persist any unsaved note before teardown.
         FlushPendingNotes();
 

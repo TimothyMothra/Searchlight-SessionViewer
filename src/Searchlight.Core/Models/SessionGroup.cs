@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 
 namespace Searchlight.Models;
 
@@ -26,4 +28,19 @@ public sealed class SessionGroup : ObservableCollection<SessionInfo>
 
     /// <summary>Abbreviated label shown on the compact tick rail (e.g. "8h", "Jul 1", "Wk Jun 15", "Jun 2026").</summary>
     public string ShortKey { get; }
+
+    internal void SetItems(IReadOnlyList<SessionInfo> sessions, bool force = false)
+    {
+        if (!force && Count == sessions.Count
+            && this.Zip(sessions).All(pair => ReferenceEquals(pair.First, pair.Second)))
+            return;
+
+        // ASSUMPTION: a group reset is cheaper than one notification per row;
+        // the owner preserves selection while applying this atomic group update.
+        Items.Clear();
+        foreach (SessionInfo session in sessions) Items.Add(session);
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
 }

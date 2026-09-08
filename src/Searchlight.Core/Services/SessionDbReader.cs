@@ -10,6 +10,24 @@ namespace Searchlight.Services;
 /// </summary>
 public sealed class SessionDbReader
 {
+    /// <summary>Reads only the displayed todos; session_state can contain large unused values.</summary>
+    public IReadOnlyList<SessionTodo> ReadTodos(string folderPath)
+    {
+        string dbPath = CopilotPaths.SessionDb(folderPath);
+        if (!File.Exists(dbPath)) return [];
+        try
+        {
+            using var connection = OpenReadOnly(dbPath);
+            connection.Open();
+            return ReadTodos(connection);
+        }
+        catch (SqliteException ex)
+        {
+            Diagnostics.CoreLog.Write($"Session todos unavailable: {ex.Message}");
+            return [];
+        }
+    }
+
     /// <summary>
     /// Loads todos and key/value session state for the session rooted at
     /// <paramref name="folderPath"/>. Returns an empty snapshot when the
@@ -116,4 +134,3 @@ public sealed record SessionDbSnapshot
     public IReadOnlyDictionary<string, string> State { get; init; } =
         new Dictionary<string, string>();
 }
-
