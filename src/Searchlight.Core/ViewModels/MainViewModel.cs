@@ -49,6 +49,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     // selection are additional priorities, even when older than this window.
     internal const int EagerEnrichCount = 30;
     internal const int EnrichmentBatchSize = 30;
+    internal const int SummaryReaderConcurrency = 4;
 
     /// <summary>Creates the main view-model with its services and UI dispatcher.</summary>
     public MainViewModel(
@@ -296,8 +297,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 CancellationToken token = _lifetime.Token;
                 var loaded = await Task.Run(() =>
                 {
+                    long started = Stopwatch.GetTimestamp();
                     token.ThrowIfCancellationRequested();
-                    return (Sessions: _dataSource.LoadCheap(), Notes: _notes.LoadNoteIds());
+                    var sessions = _dataSource.LoadCheap();
+                    var notes = _notes.LoadNoteIds();
+                    return (Sessions: sessions, Notes: notes,
+                        ReadMs: Stopwatch.GetElapsedTime(started).TotalMilliseconds);
                 }, token).ConfigureAwait(true);
                 token.ThrowIfCancellationRequested();
                 _notedIds = new(loaded.Notes);
@@ -312,16 +317,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 int[] eagerIndices = Enumerable.Range(0, initial.Count)
                     .Where(i => priorities.Contains(initial[i].Id) && !initial[i].IsEnriched)
                     .OrderByDescending(i => pins.Contains(initial[i].Id)).ToArray();
-                await Task.Run(() =>
+                double eagerMs = 0;
+                await Task.Run(async () =>
                 {
-                    foreach (int i in eagerIndices)
+                    long started = Stopwatch.GetTimestamp();
+                    // Finish pending pins before starting the ordinary recent
+                    // window, even though reads within each tier can overlap.
+                    foreach (int[] tier in new[]
                     {
-                        token.ThrowIfCancellationRequested();
-                        initial[i] = _dataSource.EnrichOne(initial[i]);
+                        eagerIndices.Where(i => pins.Contains(initial[i].Id)).ToArray(),
+                        eagerIndices.Where(i => !pins.Contains(initial[i].Id)).ToArray(),
+                    })
+                    {
+                        SessionInfo[] rows = await EnrichSessionsAsync(
+                            tier.Select(i => initial[i]).ToArray(), token).ConfigureAwait(false);
+                        for (int i = 0; i < tier.Length; i++) initial[tier[i]] = rows[i];
                     }
+                    eagerMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 }, token).ConfigureAwait(true);
                 token.ThrowIfCancellationRequested();
 
+                long initialUiStarted = Stopwatch.GetTimestamp();
                 var previous = _all.ToDictionary(s => s.Id);
                 _all.Clear();
                 _rowIndices.Clear();
@@ -335,23 +351,35 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 }
                 TotalCount = _all.Count;
                 ApplyFilter();
+                double initialUiMs = Stopwatch.GetElapsedTime(initialUiStarted).TotalMilliseconds;
                 CoreLog.Write($"LoadAsync: published {VisibleCount} rows in {SessionGroups.Count} groups (total {TotalCount}, eager {eagerIndices.Length}) in {loadStopwatch.Elapsed.TotalSeconds:0.00}s");
                 HookWatcher();
 
                 SessionInfo[] pending = _all.Where(s => !s.IsEnriched).ToArray();
+                double backgroundReadMs = 0, backgroundUiMs = 0, schedulingMs = 0;
                 foreach (SessionInfo[] batch in pending.Chunk(EnrichmentBatchSize))
                 {
-                    SessionInfo[] enriched = await Task.Run(() => batch.Select(s =>
+                    long batchStarted = Stopwatch.GetTimestamp();
+                    var result = await Task.Run(async () =>
                     {
-                        token.ThrowIfCancellationRequested();
-                        return _dataSource.EnrichOne(s);
-                    }).ToArray(), token).ConfigureAwait(true);
+                        long started = Stopwatch.GetTimestamp();
+                        SessionInfo[] rows = await EnrichSessionsAsync(batch, token).ConfigureAwait(false);
+                        return (Rows: rows, ReadMs: Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                    }, token).ConfigureAwait(true);
+                    backgroundReadMs += result.ReadMs;
+                    schedulingMs += Stopwatch.GetElapsedTime(batchStarted).TotalMilliseconds - result.ReadMs;
                     token.ThrowIfCancellationRequested();
-                    ReplaceRows(enriched);
+                    long uiStarted = Stopwatch.GetTimestamp();
+                    ReplaceRows(result.Rows);
+                    backgroundUiMs += Stopwatch.GetElapsedTime(uiStarted).TotalMilliseconds;
                 }
                 CoreLog.Write($"LoadAsync: background enrichment complete ({pending.Length} rows, {(pending.Length + EnrichmentBatchSize - 1) / EnrichmentBatchSize} batches)");
+                long finalUiStarted = Stopwatch.GetTimestamp();
                 ApplyFilter();
                 Details.Load(SelectedSession, refresh: true);
+                // ASSUMPTION: worker wall time and UI mutation time must be measured
+                // separately; a headless reader benchmark cannot reveal WinUI costs.
+                CoreLog.Write($"LoadAsync: timings(ms) catalog={loaded.ReadMs:0} eager={eagerMs:0} initialUI={initialUiMs:0} backgroundRead={backgroundReadMs:0} backgroundUI={backgroundUiMs:0} scheduling={schedulingMs:0} finalUI={Stopwatch.GetElapsedTime(finalUiStarted).TotalMilliseconds:0}");
                 ReportLoadTime(loadStopwatch);
             } while (_reloadRequested && !_lifetime.IsCancellationRequested);
         }
@@ -370,6 +398,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             IsLoading = false;
         }
+    }
+
+    private async Task<SessionInfo[]> EnrichSessionsAsync(IReadOnlyList<SessionInfo> sessions, CancellationToken token)
+    {
+        var rows = new SessionInfo[sessions.Count];
+        // ASSUMPTION: four readers overlap local filesystem latency without
+        // launching one task per folder or saturating the machine's I/O queue.
+        await Parallel.ForEachAsync(Enumerable.Range(0, sessions.Count),
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = SummaryReaderConcurrency,
+                CancellationToken = token,
+                TaskScheduler = TaskScheduler.Default,
+            },
+            (i, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                rows[i] = _dataSource.EnrichOne(sessions[i]);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+        return rows;
     }
 
     /// <summary>
@@ -396,23 +445,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _suppressSelectionSideEffects = true;
         try
         {
-            var changedGroups = new Dictionary<SessionGroup, List<SessionInfo>>();
+            string? keepId = SelectedSession?.Id;
             foreach (SessionInfo input in rows)
             {
                 SessionInfo row = PrepareRow(input);
                 if (_rowIndices.TryGetValue(row.Id, out int index)) _all[index] = row;
                 if (_visibleRows.TryGetValue(row.Id, out var position))
                 {
-                    if (!changedGroups.TryGetValue(position.Group, out var items))
-                    {
-                        items = [.. position.Group];
-                        changedGroups[position.Group] = items;
-                    }
-                    items[position.Index] = row;
+                    // Batch dispatch, not collection resets. Resetting a whole
+                    // group discards WinUI's realized containers even when only
+                    // off-screen metadata changed.
+                    position.Group[position.Index] = row;
                 }
             }
-            string? keepId = SelectedSession?.Id;
-            foreach (var (group, items) in changedGroups) group.SetItems(items);
             if (keepId is not null && _rowIndices.TryGetValue(keepId, out int selectedIndex))
                 SelectedSession = _all[selectedIndex];
         }

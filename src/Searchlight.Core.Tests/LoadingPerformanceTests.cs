@@ -41,7 +41,28 @@ public sealed class LoadingPerformanceTests
     }
 
     [Fact]
-    public async Task BackgroundEnrichment_BatchesNotifications_NotOnePerRow()
+    public async Task SummaryReads_AreBoundedAndKeepResultsInOrder()
+    {
+        var source = new CountingSource(100);
+        int active = 0, maximum = 0;
+        object gate = new();
+        source.OnEnrich = _ =>
+        {
+            lock (gate) { active++; maximum = Math.Max(maximum, active); }
+            // Model blocking filesystem latency without depending on disk speed.
+            Thread.Sleep(5);
+            lock (gate) active--;
+        };
+        using var vm = Create(source);
+        await vm.LoadCommand.ExecuteAsync(null);
+        Assert.InRange(maximum, 1, 4);
+        Assert.Equal(100, source.EnrichCalls);
+        Assert.Equal(source.Sessions.Select(s => s.Id),
+            vm.SessionGroups.SelectMany(g => g).Select(s => s.Id));
+    }
+
+    [Fact]
+    public async Task BackgroundEnrichment_UpdatesOnlyChangedRows_WithoutGroupResets()
     {
         var source = new CountingSource(1000);
         using var vm = Create(source);
@@ -57,10 +78,10 @@ public sealed class LoadingPerformanceTests
                 };
         };
         await vm.LoadCommand.ExecuteAsync(null);
-        Assert.Equal(0, replacements);
-        // ASSUMPTION: this fixture stays in one recency bucket. One reset per
-        // 30-row batch replaces the old 970 individual row notifications.
-        Assert.InRange(resets, 1, 34);
+        Assert.Equal(970, replacements);
+        // ASSUMPTION: this fixture stays in one recency bucket. A reset would
+        // invalidate all 1,000 rows, rather than just each changed item.
+        Assert.Equal(0, resets);
     }
 
     [Fact]

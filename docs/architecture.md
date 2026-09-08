@@ -141,9 +141,14 @@ manually (double-dispose). See `App.ExitApplication`.
   timestamps/lengths, and checkpoint-directory timestamps invalidate changed summaries; deleted
   folders are evicted. The cache is not persisted to Copilot's data directory.
 - **First publication** enriches the newest **30** rows plus every pin and the current selection.
-  Remaining missing summaries load in **30-row batches**, with indexed row lookup and one update
-  per affected group per batch. Names, folders, branches and dates remain searchable across the
+  Remaining missing summaries load in **30-row batches**, with indexed row lookup and one UI
+  continuation per batch. Within a batch, indexed item replacements preserve WinUI's realized
+  containers; resetting entire groups for metadata updates causes costly layout churn.
+  Names, folders, branches and dates remain searchable across the
   entire catalog once this background pass completes; heavy details are not prefetched.
+  At most **four summary readers** overlap filesystem latency within each batch. Input order
+  is preserved, and pending pins finish before ordinary recent rows start. YAML file reads
+  overlap, but use of the shared deserializer is serialized.
 - **Filtering** uses in-memory metadata and a note-presence index loaded once per refresh.
   Unchanged groups/rows are retained, and filtering an unchanged selection does not reload details.
 - **Details** load asynchronously through `SessionDetailsLoader`, with a serial worker and an
@@ -157,6 +162,8 @@ manually (double-dispose). See `App.ExitApplication`.
   preview, not a complete transcript or a claim about the model after the scanned window.
 - **Diagnostics** distinguish first publication from full summary completion. The footer's
   `Loaded N sessions in Xs` covers all summary batches, not just first display or detail completion.
+  Per-phase timings separate catalog/eager/background reader work, UI mutations, and scheduling
+  delays so a headless benchmark is not mistaken for end-to-end WinUI startup performance.
 
 **Live refresh:** `SessionWatcher` wraps a `FileSystemWatcher` on `~/.copilot/session-state` and
 raises a single **debounced** `Changed` event for structural session/lock changes. `MainViewModel`

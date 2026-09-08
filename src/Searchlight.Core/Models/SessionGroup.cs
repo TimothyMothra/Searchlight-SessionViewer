@@ -35,8 +35,8 @@ public sealed class SessionGroup : ObservableCollection<SessionInfo>
             && this.Zip(sessions).All(pair => ReferenceEquals(pair.First, pair.Second)))
             return;
 
-        // ASSUMPTION: a group reset is cheaper than one notification per row;
-        // the owner preserves selection while applying this atomic group update.
+        // Only filtering/regrouping resets membership. Progressive metadata
+        // enrichment uses indexed replacements to preserve WinUI virtualization.
         Items.Clear();
         foreach (SessionInfo session in sessions) Items.Add(session);
         OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));

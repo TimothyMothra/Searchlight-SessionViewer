@@ -30,8 +30,15 @@ public sealed class WorkspaceYamlReader
 
         try
         {
-            using var reader = new StreamReader(path);
-            Dto? dto = Deserializer.Deserialize<Dto>(reader);
+            // Workspace files are small summaries, not transcripts. Read outside
+            // the parser lock so bounded folder readers can overlap filesystem I/O;
+            // never use the shared YamlDotNet deserializer concurrently.
+            string yaml = File.ReadAllText(path);
+            Dto? dto;
+            lock (Deserializer)
+            {
+                dto = Deserializer.Deserialize<Dto>(yaml);
+            }
             if (dto is null)
             {
                 return null;
