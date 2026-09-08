@@ -62,6 +62,35 @@ public sealed class LoadingPerformanceTests
     }
 
     [Fact]
+    public async Task SummaryProducer_ReadsAheadWhileConsumerIsPaused_WithinBoundedCapacity()
+    {
+        var source = new CountingSource(180);
+        var prefetched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int limit = SessionSummaryReader.BatchSize * (SessionSummaryReader.BufferedBatches + 2);
+        source.OnEnrich = _ =>
+        {
+            if (source.EnrichCalls == limit) prefetched.TrySetResult();
+        };
+        var reader = new SessionSummaryReader(source);
+        await using var batches = reader.ReadBatchesAsync(source.Sessions, default).GetAsyncEnumerator();
+        Assert.True(await batches.MoveNextAsync());
+        // Do not request another UI batch. Reader work must continue independently,
+        // stopping at the bounded queue plus delivered and in-flight batches.
+        await prefetched.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(limit, source.EnrichCalls);
+    }
+
+    [Fact]
+    public async Task SummaryProducer_PropagatesReaderFailureWithoutHangingConsumer()
+    {
+        var source = new CountingSource(180);
+        source.OnEnrich = _ => throw new IOException("synthetic read failure");
+        var reader = new SessionSummaryReader(source);
+        await using var batches = reader.ReadBatchesAsync(source.Sessions, default).GetAsyncEnumerator();
+        await Assert.ThrowsAsync<IOException>(() => batches.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
     public async Task BackgroundEnrichment_UpdatesOnlyChangedRows_WithoutGroupResets()
     {
         var source = new CountingSource(1000);

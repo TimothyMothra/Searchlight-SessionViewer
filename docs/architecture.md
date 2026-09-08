@@ -141,8 +141,10 @@ manually (double-dispose). See `App.ExitApplication`.
   timestamps/lengths, and checkpoint-directory timestamps invalidate changed summaries; deleted
   folders are evicted. The cache is not persisted to Copilot's data directory.
 - **First publication** enriches the newest **30** rows plus every pin and the current selection.
-  Remaining missing summaries load in **30-row batches**, with indexed row lookup and one UI
-  continuation per batch. Within a batch, indexed item replacements preserve WinUI's realized
+  Remaining missing summaries load in **30-row batches**, with indexed row lookup and a
+  bounded producer/consumer queue. The producer can retain two queued batches and continue reading
+  while the UI renders; it does not wait for a UI continuation before starting every batch.
+  Within a batch, indexed item replacements preserve WinUI's realized
   containers; resetting entire groups for metadata updates causes costly layout churn.
   Names, folders, branches and dates remain searchable across the
   entire catalog once this background pass completes; heavy details are not prefetched.
@@ -164,6 +166,8 @@ manually (double-dispose). See `App.ExitApplication`.
   `Loaded N sessions in Xs` covers all summary batches, not just first display or detail completion.
   Per-phase timings separate catalog/eager/background reader work, UI mutations, and scheduling
   delays so a headless benchmark is not mistaken for end-to-end WinUI startup performance.
+  Accumulated queue-wait time overlaps producer work and must not be added to reader time as
+  though they were sequential stages.
 
 **Live refresh:** `SessionWatcher` wraps a `FileSystemWatcher` on `~/.copilot/session-state` and
 raises a single **debounced** `Changed` event for structural session/lock changes. `MainViewModel`

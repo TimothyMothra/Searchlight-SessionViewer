@@ -19,6 +19,7 @@ namespace Searchlight.ViewModels;
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly ISessionDataSource _dataSource;
+    private readonly SessionSummaryReader _summaryReader;
     private readonly ISessionWatcher _watcher;
     private readonly IUiDispatcher _dispatcher;
 
@@ -48,8 +49,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     // ASSUMPTION: 30 recent rows cover a screenful plus buffer. All pins and the
     // selection are additional priorities, even when older than this window.
     internal const int EagerEnrichCount = 30;
-    internal const int EnrichmentBatchSize = 30;
-    internal const int SummaryReaderConcurrency = 4;
+    internal const int EnrichmentBatchSize = SessionSummaryReader.BatchSize;
+    internal const int SummaryReaderConcurrency = SessionSummaryReader.Concurrency;
 
     /// <summary>Creates the main view-model with its services and UI dispatcher.</summary>
     public MainViewModel(
@@ -61,6 +62,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         IUiDispatcher dispatcher)
     {
         _dataSource = dataSource;
+        _summaryReader = new SessionSummaryReader(dataSource);
         _watcher = watcher;
         _dispatcher = dispatcher;
         _notes = notes;
@@ -329,7 +331,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         eagerIndices.Where(i => !pins.Contains(initial[i].Id)).ToArray(),
                     })
                     {
-                        SessionInfo[] rows = await EnrichSessionsAsync(
+                        SessionInfo[] rows = await _summaryReader.EnrichAsync(
                             tier.Select(i => initial[i]).ToArray(), token).ConfigureAwait(false);
                         for (int i = 0; i < tier.Length; i++) initial[tier[i]] = rows[i];
                     }
@@ -356,18 +358,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 HookWatcher();
 
                 SessionInfo[] pending = _all.Where(s => !s.IsEnriched).ToArray();
-                double backgroundReadMs = 0, backgroundUiMs = 0, schedulingMs = 0;
-                foreach (SessionInfo[] batch in pending.Chunk(EnrichmentBatchSize))
+                double backgroundReadMs = 0, backgroundUiMs = 0, queueWaitMs = 0;
+                await foreach (SummaryBatch result in _summaryReader.ReadBatchesAsync(pending, token).ConfigureAwait(true))
                 {
-                    long batchStarted = Stopwatch.GetTimestamp();
-                    var result = await Task.Run(async () =>
-                    {
-                        long started = Stopwatch.GetTimestamp();
-                        SessionInfo[] rows = await EnrichSessionsAsync(batch, token).ConfigureAwait(false);
-                        return (Rows: rows, ReadMs: Stopwatch.GetElapsedTime(started).TotalMilliseconds);
-                    }, token).ConfigureAwait(true);
-                    backgroundReadMs += result.ReadMs;
-                    schedulingMs += Stopwatch.GetElapsedTime(batchStarted).TotalMilliseconds - result.ReadMs;
+                    backgroundReadMs += result.ReadMilliseconds;
+                    queueWaitMs += Stopwatch.GetElapsedTime(result.ReadyTimestamp).TotalMilliseconds;
                     token.ThrowIfCancellationRequested();
                     long uiStarted = Stopwatch.GetTimestamp();
                     ReplaceRows(result.Rows);
@@ -379,7 +374,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 Details.Load(SelectedSession, refresh: true);
                 // ASSUMPTION: worker wall time and UI mutation time must be measured
                 // separately; a headless reader benchmark cannot reveal WinUI costs.
-                CoreLog.Write($"LoadAsync: timings(ms) catalog={loaded.ReadMs:0} eager={eagerMs:0} initialUI={initialUiMs:0} backgroundRead={backgroundReadMs:0} backgroundUI={backgroundUiMs:0} scheduling={schedulingMs:0} finalUI={Stopwatch.GetElapsedTime(finalUiStarted).TotalMilliseconds:0}");
+                CoreLog.Write($"LoadAsync: timings(ms) catalog={loaded.ReadMs:0} eager={eagerMs:0} initialUI={initialUiMs:0} backgroundRead={backgroundReadMs:0} backgroundUI={backgroundUiMs:0} queueWait(overlapping)={queueWaitMs:0} finalUI={Stopwatch.GetElapsedTime(finalUiStarted).TotalMilliseconds:0}");
                 ReportLoadTime(loadStopwatch);
             } while (_reloadRequested && !_lifetime.IsCancellationRequested);
         }
@@ -398,27 +393,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             IsLoading = false;
         }
-    }
-
-    private async Task<SessionInfo[]> EnrichSessionsAsync(IReadOnlyList<SessionInfo> sessions, CancellationToken token)
-    {
-        var rows = new SessionInfo[sessions.Count];
-        // ASSUMPTION: four readers overlap local filesystem latency without
-        // launching one task per folder or saturating the machine's I/O queue.
-        await Parallel.ForEachAsync(Enumerable.Range(0, sessions.Count),
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = SummaryReaderConcurrency,
-                CancellationToken = token,
-                TaskScheduler = TaskScheduler.Default,
-            },
-            (i, ct) =>
-            {
-                ct.ThrowIfCancellationRequested();
-                rows[i] = _dataSource.EnrichOne(sessions[i]);
-                return ValueTask.CompletedTask;
-            }).ConfigureAwait(false);
-        return rows;
     }
 
     /// <summary>
