@@ -49,6 +49,9 @@ public sealed partial class MainView : UserControl
     /// </summary>
     public bool IsElevated { get; } = ElevationHelper.IsElevated();
 
+    public bool CanChangeElevation => !App.NoAdmin;
+    public bool HasElevationOverride => App.NoAdmin;
+
     /// <summary>
     /// The host window's native HWND, injected by <see cref="MainWindow"/> after the content
     /// is set. Used by the bottom-right resize grip to hand off a native window-resize loop

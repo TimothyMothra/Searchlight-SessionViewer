@@ -85,8 +85,12 @@ unpackaged WinUI does **not** surface args through `LaunchActivatedEventArgs`.
 | *(none)* | Tray mode. Window hides to tray on close; only tray **Exit** quits. |
 | `--no-tray` | Plain window, **no** tray icon; closing the window exits the process. (For a non-tray/cross-platform-style presentation.) |
 | `--demo` | Boot against the synthetic `MockSessionDataSource` at runtime (15 deterministic sessions). Ignored — always-on — in the `Demo` build. |
+| `--no-admin` | Ignore the saved elevation preference for this launch and disable its toggle without changing settings. Launch from a standard-user shell; an already elevated invocation exits with a diagnostic instead of claiming to be non-admin. |
 
 Flags compose, e.g. `--no-tray --demo`.
+
+For unattended demo/UI work, use `--no-tray --demo --no-admin` from a non-elevated
+terminal. This avoids a UAC prompt even when the normal app is configured to run as administrator.
 
 ---
 

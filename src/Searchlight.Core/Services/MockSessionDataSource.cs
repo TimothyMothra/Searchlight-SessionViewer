@@ -48,8 +48,13 @@ public sealed class MockSessionDataSource : ISessionDataSource
         _snapshots.TryGetValue(sessionId, out var s) ? s : [];
 
     /// <inheritdoc />
-    public IReadOnlyList<SessionTodo> ReadTodos(SessionInfo session) =>
-        _todos.TryGetValue(session.Id, out var t) ? t : [];
+    public SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
+        return _todos.TryGetValue(session.Id, out var todos)
+            ? new() { Todos = todos }
+            : new() { Status = SessionTodosStatus.MissingDatabase, Message = "This session has no session.db yet." };
+    }
 
     private List<SessionInfo> BuildSessions()
     {
@@ -239,10 +244,10 @@ public sealed class MockSessionDataSource : ISessionDataSource
 
             _todos[id] =
             [
-                new SessionTodo { Id = "t1", Title = "Reproduce the issue", Status = "done" },
-                new SessionTodo { Id = "t2", Title = "Implement the fix", Status = "done" },
-                new SessionTodo { Id = "t3", Title = "Add a regression test", Status = "in_progress" },
-                new SessionTodo { Id = "t4", Title = "Update the docs", Status = "pending" },
+                new SessionTodo { Id = "t1", Title = "Reproduce the issue", Description = "Capture the failing scenario with a deterministic synthetic input.", Status = "done" },
+                new SessionTodo { Id = "t2", Title = "Implement the fix", Description = "Update the affected code path while preserving existing behavior.", Status = "done" },
+                new SessionTodo { Id = "t3", Title = "Add a regression test", Description = "Exercise the original failure and the successful retry path. Include cancellation and empty-input cases so future changes cannot silently regress the fix.", Status = "in_progress" },
+                new SessionTodo { Id = "t4", Title = "Update the docs", Description = "Document the behavior and any assumptions that callers need to know.", Status = "pending" },
             ];
         }
 

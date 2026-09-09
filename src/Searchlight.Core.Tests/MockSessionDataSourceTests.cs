@@ -50,7 +50,10 @@ public sealed class MockSessionDataSourceTests
 
         Assert.Equal(3, _sut.ReadCheckpoints(detail).Count);
         Assert.Equal(3, _sut.LoadSnapshots(detail.Id).Count);
-        Assert.Equal(4, _sut.ReadTodos(detail).Count);
+        SessionTodosResult result = _sut.ReadTodos(detail);
+        Assert.Equal(SessionTodosStatus.Success, result.Status);
+        Assert.Equal(4, result.Todos.Count);
+        Assert.All(result.Todos, todo => Assert.False(string.IsNullOrWhiteSpace(todo.Description)));
         Assert.Equal(3, detail.SnapshotCount);
         Assert.True(detail.HasSessionDb);
         Assert.True(detail.HasPlan);
@@ -60,7 +63,7 @@ public sealed class MockSessionDataSourceTests
     public void DetailSession_TodoStatuses_AreDoneDoneInProgressPending()
     {
         SessionInfo detail = _sut.LoadAll().First(s => s.Id == DetailId);
-        var statuses = _sut.ReadTodos(detail).Select(t => t.Status).ToArray();
+        var statuses = _sut.ReadTodos(detail).Todos.Select(t => t.Status).ToArray();
         Assert.Equal(["done", "done", "in_progress", "pending"], statuses);
     }
 
@@ -72,7 +75,8 @@ public sealed class MockSessionDataSourceTests
         Assert.False(plain.HasCheckpoints);
         Assert.Empty(_sut.ReadCheckpoints(plain));
         Assert.Empty(_sut.LoadSnapshots(plain.Id));
-        Assert.Empty(_sut.ReadTodos(plain));
+        Assert.Empty(_sut.ReadTodos(plain).Todos);
+        Assert.Equal(SessionTodosStatus.MissingDatabase, _sut.ReadTodos(plain).Status);
         Assert.Equal(0, plain.SnapshotCount);
     }
 

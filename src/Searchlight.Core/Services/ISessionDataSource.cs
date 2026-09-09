@@ -37,8 +37,8 @@ public interface ISessionDataSource
     /// <summary>Recent status snapshots for the given session id (newest first).</summary>
     IReadOnlyList<SnapshotInfo> LoadSnapshots(string sessionId);
 
-    /// <summary>Todos read from the given session's store.</summary>
-    IReadOnlyList<SessionTodo> ReadTodos(SessionInfo session);
+    /// <summary>Fresh todo snapshot, read only on Todos activation or explicit Todos refresh.</summary>
+    SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default);
 
     /// <summary>
     /// Version of detail inputs, checked on a worker when selecting or refreshing.

@@ -5,8 +5,7 @@ namespace Searchlight.Services;
 internal sealed record SessionDetails(
     SessionInfo Session,
     IReadOnlyList<CheckpointInfo> Checkpoints,
-    IReadOnlyList<SnapshotInfo> Snapshots,
-    IReadOnlyList<SessionTodo> Todos);
+    IReadOnlyList<SnapshotInfo> Snapshots);
 
 internal sealed class SessionDetailsLoader(ISessionDataSource source)
 {
@@ -59,9 +58,8 @@ internal sealed class SessionDetailsLoader(ISessionDataSource source)
         token.ThrowIfCancellationRequested();
         var snapshots = source.LoadSnapshots(enriched.Id);
         token.ThrowIfCancellationRequested();
-        var todos = source.ReadTodos(enriched);
-        token.ThrowIfCancellationRequested();
-        var details = new SessionDetails(enriched, checkpoints, snapshots, todos);
+        // Todos are intentionally excluded: only explicit tab activation may read session.db.
+        var details = new SessionDetails(enriched, checkpoints, snapshots);
 
         // Do not cache a torn read while an active session is appending/writing.
         if (version == source.GetDetailsVersion(session))

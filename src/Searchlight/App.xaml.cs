@@ -47,6 +47,9 @@ public partial class App : Application
     // system-tray icon and closing the window exits the process.
     private bool _noTray;
 
+    /// <summary>Per-launch elevation override; never changes the saved preference.</summary>
+    internal static bool NoAdmin => HasFlag("--no-admin");
+
     // Single-instance guard (normal tray mode only). The first instance owns this
     // mutex and listens on a named event; a later normal launch (e.g. the user
     // clicks the Start Menu / desktop shortcut while the run-at-login instance is
@@ -137,11 +140,20 @@ public partial class App : Application
         Log("OnLaunched: loading settings");
         var settingsService = new SettingsService();
 
+        // ASSUMPTION: automation launches from a standard-user shell. Do not
+        // silently claim a non-admin launch if an elevated parent supplied its token.
+        if (NoAdmin && ElevationHelper.IsElevated())
+        {
+            Log("OnLaunched: --no-admin requires launching from a non-elevated shell; exiting");
+            Exit();
+            return;
+        }
+
         // On-demand elevation: if the user opted in via the Settings toggle and we
         // are not already elevated, relaunch as Administrator so `wt -w` resume
         // calls can reuse an elevated Terminal window. A cancelled UAC prompt just
         // continues non-elevated (shared-window reuse degrades to a new window).
-        if (settingsService.Current.RunElevated && !ElevationHelper.IsElevated())
+        if (!NoAdmin && settingsService.Current.RunElevated && !ElevationHelper.IsElevated())
         {
             Log("OnLaunched: RunElevated set + not elevated -> relaunching elevated");
             if (ElevationHelper.RelaunchElevated())
@@ -164,7 +176,7 @@ public partial class App : Application
         //               default when compiled in the Demo config via USE_MOCK).
         _noTray = HasFlag("--no-tray");
         bool useMock = ResolveUseMock();
-        Log($"OnLaunched: noTray={_noTray} useMock={useMock}");
+        Log($"OnLaunched: noTray={_noTray} useMock={useMock} noAdmin={NoAdmin} elevated={ElevationHelper.IsElevated()}");
 
         // Single-instance: only the normal tray app participates. If another normal
         // instance is already running, tell it to show its window and exit this one
@@ -404,7 +416,7 @@ public partial class App : Application
     /// </summary>
     private void OnSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(AppSettings.RunElevated))
+        if (NoAdmin || e.PropertyName != nameof(AppSettings.RunElevated))
         {
             return;
         }

@@ -321,7 +321,7 @@ public sealed class LoadingPerformanceTests
         }
         public IReadOnlyList<CheckpointInfo> ReadCheckpoints(SessionInfo session) => [];
         public IReadOnlyList<SnapshotInfo> LoadSnapshots(string id) => [];
-        public IReadOnlyList<SessionTodo> ReadTodos(SessionInfo session) => [];
+        public SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default) => new();
         public string GetDetailsVersion(SessionInfo session)
         {
             Interlocked.Increment(ref VersionCalls);

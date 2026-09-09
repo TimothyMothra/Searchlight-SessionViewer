@@ -10,8 +10,8 @@ namespace Searchlight.ViewModels;
 
 /// <summary>
 /// Backs the details pane for the currently-selected session. Lazily loads the
-/// per-session heavy data (events head, checkpoints, snapshots, session.db) on
-/// demand and exposes the headline <see cref="ResumeCommand"/>.
+/// per-session heavy data (events head, checkpoints, snapshots) on selection.
+/// Todos have a separate explicit activation boundary.
 /// </summary>
 public sealed partial class DetailsViewModel : ObservableObject
 {
@@ -26,6 +26,7 @@ public sealed partial class DetailsViewModel : ObservableObject
     public DetailsViewModel(ISessionDataSource dataSource, IResumeLauncher resume, IClipboardService clipboard)
     {
         _loader = new SessionDetailsLoader(dataSource);
+        Todos = new TodosViewModel(dataSource);
         _resume = resume;
         _clipboard = clipboard;
     }
@@ -46,8 +47,18 @@ public sealed partial class DetailsViewModel : ObservableObject
     /// <summary>Recent status snapshots for the current session (newest first).</summary>
     public ObservableCollection<SnapshotInfo> Snapshots { get; } = [];
 
-    /// <summary>Todos read from the current session's <c>session.db</c>.</summary>
-    public ObservableCollection<SessionTodo> Todos { get; } = [];
+    /// <summary>Explicitly activated, independent todo snapshot.</summary>
+    public TodosViewModel Todos { get; }
+
+    /// <summary>Details is tab zero; Todos is tab one.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDetailsTabSelected), nameof(IsAgentTasksTabSelected))]
+    private int _selectedTabIndex;
+
+    public bool IsDetailsTabSelected => SelectedTabIndex == 0;
+    public bool IsAgentTasksTabSelected => SelectedTabIndex == 1;
+
+    partial void OnSelectedTabIndexChanged(int value) => Todos.SetActive(value == 1);
 
     /// <summary>Last status message from a resume attempt, if any.</summary>
     [ObservableProperty]
@@ -93,12 +104,13 @@ public sealed partial class DetailsViewModel : ObservableObject
         _loadCancellation = null;
         bool changed = _requested?.Id != session?.Id || _requested?.FolderPath != session?.FolderPath;
         _requested = session;
+        if (changed || session is null) SelectedTabIndex = 0;
+        Todos.SetSession(session);
         if (changed || session is null)
         {
             StatusMessage = null;
             Checkpoints.Clear();
             Snapshots.Clear();
-            Todos.Clear();
             Session = session;
         }
 
@@ -130,7 +142,6 @@ public sealed partial class DetailsViewModel : ObservableObject
             };
             ReplaceItems(Checkpoints, details.Checkpoints);
             ReplaceItems(Snapshots, details.Snapshots);
-            ReplaceItems(Todos, details.Todos);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (IOException ex)

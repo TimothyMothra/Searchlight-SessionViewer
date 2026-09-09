@@ -49,16 +49,14 @@ public sealed class LiveSessionDataSource : ISessionDataSource
         _snapshots.LoadForSession(sessionId);
 
     /// <inheritdoc />
-    public IReadOnlyList<SessionTodo> ReadTodos(SessionInfo session) =>
-        _sessionDb.ReadTodos(session.FolderPath);
+    public SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default) =>
+        _sessionDb.ReadTodos(session.FolderPath, token);
 
     /// <inheritdoc />
     public string GetDetailsVersion(SessionInfo session) => string.Join("|",
         FileVersion.ReadDirectory(session.FolderPath),
         FileVersion.Read(CopilotPaths.WorkspaceYaml(session.FolderPath)),
         FileVersion.Read(CopilotPaths.EventsJsonl(session.FolderPath)),
-        FileVersion.Read(CopilotPaths.SessionDb(session.FolderPath)),
-        FileVersion.Read(CopilotPaths.SessionDb(session.FolderPath) + "-wal"),
         FileVersion.ReadDirectory(CopilotPaths.CheckpointsDir(session.FolderPath)),
         FileVersion.Read(Path.Combine(CopilotPaths.CheckpointsDir(session.FolderPath), "index.md")),
         FileVersion.Read(CopilotPaths.SnapshotIndexDb),

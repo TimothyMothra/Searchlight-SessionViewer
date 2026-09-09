@@ -100,7 +100,12 @@
                                        Text="Turn on if your main Terminal runs as Administrator. The app restarts elevated (one UAC prompt) so resumed tabs can share your Admin Terminal window. Turning off applies on the next launch." />
                             <ToggleSwitch MinWidth="0"
                                           OnContent="On" OffContent="Off"
+                                          IsEnabled="{x:Bind CanChangeElevation}"
                                           IsOn="{x:Bind ViewModel.Settings.Current.RunElevated, Mode=TwoWay}" />
+                            <TextBlock Text="Administrator mode is disabled for this launch. Your saved preference is unchanged."
+                                       TextWrapping="Wrap"
+                                       Visibility="{x:Bind HasElevationOverride, Converter={StaticResource BoolToVis}}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                             <!-- Yolo opt-in. Appends the yolo flag to resume so the
                                  resumed session auto-approves all tool actions. -->
@@ -362,7 +367,7 @@
                     <TextBlock Text="Select a session"
                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                HorizontalAlignment="Center" />
-                    <TextBlock Text="Details, checkpoints, snapshots, and todos appear here."
+                    <TextBlock Text="Details, checkpoints, snapshots, and agent tasks appear here."
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                HorizontalAlignment="Center" TextAlignment="Center" />
                 </StackPanel>
@@ -487,7 +492,33 @@
                         </StackPanel>
                     </Grid>
 
-                    <ScrollViewer Grid.Row="1" Padding="20,0,20,16">
+                    <TabView Grid.Row="1" Margin="20,0,20,16"
+                             SelectedIndex="{x:Bind ViewModel.Details.SelectedTabIndex, Mode=TwoWay}"
+                             TabWidthMode="SizeToContent" IsAddTabButtonVisible="False"
+                             CanDragTabs="False" CanReorderTabs="False">
+                        <TabView.Resources>
+                            <!-- Keep native tab semantics and keyboard navigation; larger
+                                 headers and a selected underline distinguish tabs from actions. -->
+                            <x:Double x:Key="TabViewItemMinHeight">48</x:Double>
+                            <x:Double x:Key="TabViewItemMinWidth">144</x:Double>
+                        </TabView.Resources>
+                        <TabView.TabStripFooter>
+                            <Border Height="1" VerticalAlignment="Bottom"
+                                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        </TabView.TabStripFooter>
+                        <TabViewItem IsClosable="False" AutomationProperties.Name="Details">
+                            <TabViewItem.Header>
+                                <Grid MinWidth="112" Height="46">
+                                    <TextBlock Text="Details" FontSize="16" FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Border Height="3" CornerRadius="1" VerticalAlignment="Bottom"
+                                            Background="{ThemeResource SystemControlHighlightAccentBrush}"
+                                            Visibility="{x:Bind ViewModel.Details.IsDetailsTabSelected, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
+                                </Grid>
+                            </TabViewItem.Header>
+                    <ScrollViewer Padding="12,16,12,0"
+                                  BorderThickness="0,1,0,0"
+                                  BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
                         <StackPanel Spacing="16">
                             <!-- Detail reads are asynchronous; list navigation and
                                  resume remain available while this indicator is shown. -->
@@ -585,28 +616,99 @@
                             </ItemsControl>
                         </StackPanel>
 
-                        <!-- Todos -->
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="Todos" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <ItemsControl ItemsSource="{x:Bind ViewModel.Details.Todos}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="models:SessionTodo">
-                                        <Grid ColumnSpacing="10" Padding="0,4">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="90" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="4" Padding="6,2" VerticalAlignment="Top" HorizontalAlignment="Left">
-                                                <TextBlock Text="{x:Bind Status}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <TextBlock Grid.Column="1" Text="{x:Bind Title}" TextWrapping="Wrap" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
                     </StackPanel>
                     </ScrollViewer>
+                        </TabViewItem>
+                        <TabViewItem IsClosable="False" AutomationProperties.Name="Agent tasks">
+                            <TabViewItem.Header>
+                                <Grid MinWidth="112" Height="46">
+                                    <TextBlock Text="Agent tasks" FontSize="16" FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Border Height="3" CornerRadius="1" VerticalAlignment="Bottom"
+                                            Background="{ThemeResource SystemControlHighlightAccentBrush}"
+                                            Visibility="{x:Bind ViewModel.Details.IsAgentTasksTabSelected, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
+                                </Grid>
+                            </TabViewItem.Header>
+                            <!-- ASSUMPTION: only selecting this tab authorizes a todo read.
+                                 Keep the ListView constrained, with no outer ScrollViewer,
+                                 so long todo tables retain item virtualization. -->
+                            <Grid Padding="12,16,12,0" RowSpacing="8"
+                                  BorderThickness="0,1,0,0"
+                                  BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Work tracked by Copilot for this session. Read-only."
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="{x:Bind ViewModel.Details.Todos.CountsText, Mode=OneWay}"
+                                                   TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Refresh"
+                                            Command="{x:Bind ViewModel.Details.Todos.RefreshCommand}"
+                                            AutomationProperties.Name="Refresh agent tasks" />
+                                </Grid>
+                                <StackPanel Grid.Row="1" Spacing="8">
+                                    <TextBlock Text="Loading agent tasks..."
+                                               Visibility="{x:Bind ViewModel.Details.Todos.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVis}}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               AutomationProperties.LiveSetting="Polite" />
+                                    <TextBlock Text="{x:Bind ViewModel.Details.Todos.Message, Mode=OneWay}"
+                                               Visibility="{x:Bind ViewModel.Details.Todos.Message, Mode=OneWay, Converter={StaticResource StringToVis}}"
+                                               TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                               AutomationProperties.LiveSetting="Polite" />
+                                    <TextBlock Text="{x:Bind ViewModel.Details.Todos.Warning, Mode=OneWay}"
+                                               Visibility="{x:Bind ViewModel.Details.Todos.Warning, Mode=OneWay, Converter={StaticResource StringToVis}}"
+                                               TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <ListView Grid.Row="2"
+                                          ItemsSource="{x:Bind ViewModel.Details.Todos.Items, Mode=OneWay}"
+                                          SelectionMode="None" IsItemClickEnabled="False"
+                                          AutomationProperties.Name="Session agent tasks"
+                                          ScrollViewer.HorizontalScrollMode="Disabled"
+                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="models:SessionTodo">
+                                            <Grid ColumnSpacing="12" Padding="0,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                                        CornerRadius="4" Padding="6,2"
+                                                        VerticalAlignment="Top" HorizontalAlignment="Left">
+                                                    <TextBlock Text="{x:Bind DisplayStatus}" FontSize="12"
+                                                               TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Spacing="4">
+                                                    <TextBlock Text="{x:Bind DisplayTitle}"
+                                                               Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                               TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                                    <TextBlock Text="{x:Bind Description}"
+                                                               Visibility="{x:Bind Description, Converter={StaticResource StringToVis}}"
+                                                               TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </TabViewItem>
+                    </TabView>
                 </Grid>
             </Grid>
 

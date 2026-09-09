@@ -2,8 +2,9 @@
 
 How the app turns the on-disk `~/.copilot` layout into the in-memory domain it renders. Two halves:
 the **on-disk sources** (and the reader that consumes each), and the **domain records** the readers
-produce. Everything is **read-only** and **null-safe** — sessions vary wildly in which files exist,
-so every enrichment field degrades to empty/null rather than throwing.
+produce. Everything is **read-only** — sessions vary wildly in which files exist.
+General enrichment fields degrade to empty/null; the Todos tab uses explicit availability/error
+states so an unavailable source cannot look like an empty todo table.
 
 ---
 
@@ -19,7 +20,7 @@ so every enrichment field degrades to empty/null rather than throwing.
 | `status-snapshots/index.db` (table `snapshots`) | `SnapshotIndexReader` | Branch + snapshot count per session (bulk index scan); `SnapshotInfo` rows on demand. Read-only SQLite. | cheap bulk / heavy detail |
 | `journal/<YYYY-MM>.md` | `JournalReader` | `JournalEntry` rows from the pipe table `\| time \| session_id \| branch \| cwd \| activity \|`; last row wins per session → `JournalActivity`. | cheap (bulk) |
 | `session-state/<id>/checkpoints/NNN-title.md` + `index.md` | `CheckpointsReader` | `CheckpointInfo` list; prefers the fuller title from `index.md`'s table over the truncated file name. | heavy (lazy) |
-| `session-state/<id>/session.db` (tables `todos`, `session_state`) | `SessionDbReader` | `SessionTodo` list + session-state key/values. Read-only SQLite. | heavy (lazy) |
+| `session-state/<id>/session.db` (table `todos`) | `SessionDbReader.ReadTodos` | `SessionTodosResult`: todo rows, missing-field warnings, and explicit availability/error state. Read-only SQLite. The legacy combined reader still supports `session_state`, but the UI never calls it. | heavy (explicit Todos activation only) |
 
 **Summary/detail split.** The UI uses `LoadCheap` to discover all folders and reuse versioned
 summaries. It enriches the newest **30** sessions plus all pins and the selection before first
@@ -27,12 +28,37 @@ publication, then loads remaining summaries in **30-row batches**. This preserve
 name/folder/branch search without preloading event content. Note-presence is indexed once per
 refresh rather than probing the filesystem during search.
 
-Events, checkpoints, snapshots and todos load asynchronously on selection. A versioned,
+Events, checkpoints and snapshots load asynchronously on selection. A versioned,
 eight-entry LRU cache retains recently selected details, including empty results, without
-accumulating details for every visited session. File length/last-write time and database WAL
+accumulating details for every visited session. File length/last-write time and snapshot-index WAL
 versions are used for invalidation; unchanged filtering does not even recheck these files.
-The details pane does not load unused `session_state` values. See
+The Details tab does not read `session.db`. See
 [architecture.md](./architecture.md) for refresh, cancellation and cache assumptions.
+
+### Agent tasks tab contract
+
+The UI calls these **Agent tasks** to distinguish Copilot's tracked work from actions
+assigned to the viewer. The underlying SQLite table and internal reader/model names remain `todos`.
+
+- Selecting a different session returns to **Details** without reading its todo database.
+  Opening **Agent tasks** reads a fresh snapshot, as does its dedicated **Refresh** button.
+  Leaving and reopening Agent tasks also rereads. There is no polling or automatic todo refresh
+  from catalog/watcher updates, and same-session metadata changes retain the existing snapshot.
+- Display is a flat, virtualized list of title, wrapped description, and raw status, plus total
+  and per-status counts. Completed rows remain visible. Unknown statuses are preserved; blank/null
+  statuses are counted under `(No status)`. Titles absent from rows display `(No title)`.
+- Each read discovers available columns in `todos` and selects only recognized fields
+  (`id`, `title`, `description`, `status`). Added/reordered columns are harmless; missing fields
+  produce a warning while available fields remain visible. No recognizable display fields means
+  unsupported schema, not a list of invented rows. Renamed columns/tables are not guessed.
+- Ordinary tables use rowid order. `WITHOUT ROWID` tables use their declared primary-key order,
+  since SQLite cannot provide insertion order for them. Shadowed rowid aliases are avoided.
+- A successful empty table, missing database, missing table, unsupported schema, and unreadable
+  database have distinct outcomes. Busy, corrupt, and access failures are surfaced and retryable
+  with Refresh. No migrations, repairs, writes, checkpoints, or source copies are performed.
+- Reads include committed WAL data and hold a deferred read transaction across schema discovery
+  and row enumeration. Read-only connections are private, non-pooled, and use a one-second busy
+  timeout. Cancellation discards obsolete snapshots. No arbitrary row limit is imposed.
 
 ---
 
@@ -80,7 +106,8 @@ stored fields it exposes computed **projections**:
 | `SessionStartInfo` | copilot version, context tier, producer, start time, cwd, already-in-use, effective model + reasoning effort, first user prompt | `events.jsonl` head |
 | `CheckpointInfo` | number, title, file path, timestamp | `checkpoints/` |
 | `SnapshotInfo` | snapshot id, session id, timestamp (raw + parsed), cwd, branch, file path, `SourceTrigger` (`ask_user`/`handoff`/`task_complete`/`long_turn`/`on_demand`/`checkpoint`) | `status-snapshots/index.db` |
-| `SessionTodo` | id, title, status (`pending`/`in_progress`/`done`/`blocked`) | `session.db` |
+| `SessionTodo` | id, title, description, raw status (known and unfamiliar values) | `session.db` |
+| `SessionTodosResult` | rows, `Status` (`Success`/`MissingDatabase`/`MissingTable`/`UnsupportedSchema`/`Unavailable`), missing fields, message | one explicit todo read |
 | `JournalEntry` | time, session id, branch, cwd, activity | `journal/<YYYY-MM>.md` |
 | `SessionGroup` | `ObservableCollection<SessionInfo>` + `Key` header text | built by `MainViewModel` |
 | `AppSettings` | `UseSharedTerminalWindow`, `RunElevated`, `AppendYolo`, `HideEmptySessions`, `HideUnnamedSessions` | `settings.json` (app-owned, writable) |
@@ -134,7 +161,7 @@ screenshotted with **zero** proprietary information. Shape (locked by unit tests
 
 - **15 sessions**, exactly **6 detailed** (ids ending 01/03/05/07/09/12).
 - Each detailed session seeds **3 checkpoints**, **3 snapshots** (`SnapshotCount = 3`), **4 todos**
-  (`done`, `done`, `in_progress`, `pending`).
+  (`done`, `done`, `in_progress`, `pending`) with synthetic descriptions.
 - Plain (non-detailed) sessions carry no detail collections.
 - Every row sets `HasEvents = IsEnriched = true`, so the default **hide empty sessions** filter never
   hides a demo row. Six rows are deliberately **unnamed** (render as a UUID), which also exercises the

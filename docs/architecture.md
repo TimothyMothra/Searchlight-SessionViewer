@@ -66,11 +66,11 @@ Windows-only assembly. The host and the tests depend on Core.
 | Layer | Types | Responsibility |
 |-------|-------|----------------|
 | **Models** | `SessionInfo`, `SessionGroup`, `SessionKind`, `WorkspaceMetadata`, `SessionStartInfo`, `CheckpointInfo`, `SnapshotInfo`, `SessionTodo`, `JournalEntry`, `AppSettings` | Immutable (mostly `record`) domain data. `SessionInfo` carries computed projections (`DisplayName`, `ShortId`, `ClientLabel`, `UpdatedAt`, …). |
-| **Readers** | `SessionStateScanner`, `WorkspaceYamlReader`, `EventsJsonlReader`, `SnapshotIndexReader`, `JournalReader`, `CheckpointsReader`, `SessionDbReader` | One read-only reader per on-disk source. All null-safe: a missing/locked/malformed source degrades to empty, never throws. See [data-model.md](./data-model.md). |
+| **Readers** | `SessionStateScanner`, `WorkspaceYamlReader`, `EventsJsonlReader`, `SnapshotIndexReader`, `JournalReader`, `CheckpointsReader`, `SessionDbReader` | One read-only reader per on-disk source. Todo reads return explicit availability/error states; other readers retain their null-safe empty-result contracts. See [data-model.md](./data-model.md). |
 | **Aggregation** | `SessionAggregator` | Merges scanner + workspace + snapshot-index + journal into the `SessionInfo` list. Splits work into a **cheap bulk pass** (`LoadAll`) and **lazy per-session enrichment** (`EnrichWithEvents`). |
 | **Data source façade** | `ISessionDataSource` → `LiveSessionDataSource`, `MockSessionDataSource` | Single seam the view-models talk to. Live composes the aggregator + detail readers; Mock returns 15 synthetic sessions in-memory. |
 | **Abstractions** | `IUiDispatcher`, `IResumeLauncher`, `ISessionWatcher` | Platform seams the host implements. Keep Core free of WinUI/Win32/`Process`. |
-| **View-models** | `MainViewModel`, `DetailsViewModel` | MVVM (CommunityToolkit.Mvvm). Own the grouped session list, selection, filter, and the Resume command. |
+| **View-models** | `MainViewModel`, `DetailsViewModel`, `TodosViewModel` | MVVM (CommunityToolkit.Mvvm). Own the grouped session list, selection, filter, Resume command, and independently activated Todos snapshot. |
 | **Composition** | `ServiceCollectionExtensions.AddCopilotCore(useMock)` | Registers all of the above into an `IServiceCollection`. |
 | **Diagnostics** | `CoreLog` | A `static Action<string> Sink` seam the host points at its log file (Core can't see the exe's logger). |
 
@@ -128,10 +128,18 @@ manually (double-dispose). See `App.ExitApplication`.
                                               • EnrichWithEvents  (events.jsonl head parse)
                                               • ReadCheckpoints   (checkpoints/*.md)
                                               • LoadSnapshots     (status-snapshots index.db)
-                                              • ReadTodos         (session.db → todos)
                                                                      │
                                                                      ▼
-                                                        Details pane + Resume button
+                                                        Details tab + shared Resume button
+
+                                            Explicitly select Todos / click its Refresh
+                                                                     │
+                                                                     ▼
+                                            TodosViewModel (independent serial worker)
+                                              • ReadTodos (session.db → schema + rows)
+                                                                     │
+                                                                     ▼
+                                            Todos tab: counts, title, description, status
 ```
 
 **Summary and detail loading (performance):**
@@ -154,10 +162,18 @@ manually (double-dispose). See `App.ExitApplication`.
 - **Filtering** uses in-memory metadata and a note-presence index loaded once per refresh.
   Unchanged groups/rows are retained, and filtering an unchanged selection does not reload details.
 - **Details** load asynchronously through `SessionDetailsLoader`, with a serial worker and an
-  **eight-entry LRU cache**. Event/database/WAL/workspace/checkpoint/snapshot versions are checked
+  **eight-entry LRU cache**. Event/workspace/checkpoint/snapshot (including snapshot-index WAL) versions are checked
   on selection or explicit refresh. Inputs that change during a read are not cached. Superseded
   selections cancel queued work and cannot publish stale results. Resume/copy remain available
-  while details load. Only todos, not unused `session_state` values, are read for this pane.
+  while details load. General details never read `session.db`.
+- **Agent tasks** (the `todos` table) live on the second tab beneath the shared session header. Every explicit activation
+  and its dedicated **Refresh** action reads a fresh snapshot off-thread; there is no polling,
+  watcher/global-refresh read, or todo LRU cache. Switching to another session resets to Details.
+  Same-session metadata refreshes preserve the selected tab and snapshot. Cancellation and a
+  generation guard discard reads superseded by a session/tab change; reads are serialized so a
+  cancelled SQLite call cannot cause overlapping retries. Loading clears the old snapshot, and
+  empty/unavailable/error states are distinct. A constrained `ListView` virtualizes the flat list;
+  counts include completed, unfamiliar, and missing statuses. Notes remain in their separate pane.
 - **Event previews** are UTF-8, bounded to 2,000 lines / 8 MiB input / 1 MiB per event.
   Oversized events are skipped through the next line boundary; budget hits are logged. The parser
   uses pooled buffers and disposes each JSON document without cloning it. These limits bound a
@@ -218,8 +234,12 @@ on refresh (detail content is also checked when reselected).
   same 15-session fixture — one source of truth for “what does populated data look like.”
 - **`InternalsVisibleTo` for white-box tests.** `MainViewModel.GroupKeyFor` (the recency-bucket
   ladder) is `internal static` and unit-tested directly for its strict `<` boundaries.
-- **Read-only SQLite + null-safe readers.** Every reader opens sources read-only and degrades to
-  empty on any failure, so a locked `session.db` or half-written file never crashes the UI.
+- **Read-only SQLite + explicit todo outcomes.** Todo reads use a short-lived read-only connection
+  and a deferred read transaction so schema and rows come from one committed snapshot, including
+  WAL commits. A bounded busy timeout keeps retries responsive. Schema discovery tolerates added,
+  reordered, or missing columns and unfamiliar statuses. Missing database/table, unsupported schema,
+  successful empty results, and read errors are separate outcomes, not interchangeable empty lists.
+  Other readers retain their existing null-safe contracts.
 - **Diagnostic `CoreLog.Sink` seam.** Core emits breadcrumbs without referencing the host's logger;
   the host points the sink at its temp-file log in the `App` constructor.
 
