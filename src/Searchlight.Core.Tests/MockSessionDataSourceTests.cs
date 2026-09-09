@@ -54,6 +54,11 @@ public sealed class MockSessionDataSourceTests
         Assert.Equal(SessionTodosStatus.Success, result.Status);
         Assert.Equal(4, result.Todos.Count);
         Assert.All(result.Todos, todo => Assert.False(string.IsNullOrWhiteSpace(todo.Description)));
+        Assert.All(result.Todos, todo =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(todo.CreatedAt));
+            Assert.False(string.IsNullOrWhiteSpace(todo.UpdatedAt));
+        });
         Assert.Equal(3, detail.SnapshotCount);
         Assert.True(detail.HasSessionDb);
         Assert.True(detail.HasPlan);

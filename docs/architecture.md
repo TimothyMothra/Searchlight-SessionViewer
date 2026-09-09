@@ -172,8 +172,11 @@ manually (double-dispose). See `App.ExitApplication`.
   Same-session metadata refreshes preserve the selected tab and snapshot. Cancellation and a
   generation guard discard reads superseded by a session/tab change; reads are serialized so a
   cancelled SQLite call cannot cause overlapping retries. Loading clears the old snapshot, and
-  empty/unavailable/error states are distinct. A constrained `ListView` virtualizes the flat list;
-  counts include completed, unfamiliar, and missing statuses. Notes remain in their separate pane.
+  empty/unavailable/error states are distinct. A constrained `ListView` virtualizes the flat
+  six-column table (ID, title, description, status, created, updated); the surrounding horizontal-only
+  scroller keeps headers aligned without unbounding vertical layout. Counts include completed,
+  unfamiliar, and missing statuses. Compact native tabs retain the selected accent underline.
+  Notes remain in their separate pane.
 - **Event previews** are UTF-8, bounded to 2,000 lines / 8 MiB input / 1 MiB per event.
   Oversized events are skipped through the next line boundary; budget hits are logged. The parser
   uses pooled buffers and disposes each JSON document without cloning it. These limits bound a

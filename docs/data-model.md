@@ -44,11 +44,19 @@ assigned to the viewer. The underlying SQLite table and internal reader/model na
   Opening **Agent tasks** reads a fresh snapshot, as does its dedicated **Refresh** button.
   Leaving and reopening Agent tasks also rereads. There is no polling or automatic todo refresh
   from catalog/watcher updates, and same-session metadata changes retain the existing snapshot.
-- Display is a flat, virtualized list of title, wrapped description, and raw status, plus total
-  and per-status counts. Completed rows remain visible. Unknown statuses are preserved; blank/null
+- Display is a flat, virtualized table of ID, title, wrapped description, raw status, created
+  timestamp, and updated timestamp, plus total and per-status counts. Narrow panes scroll
+  horizontally; column headers remain visible during vertical scrolling. Timestamps are shown
+  exactly as stored (including an offset if present), without assuming a timezone for bare values.
+  Headers sort all loaded rows in either direction; **Updated descending** is the initial
+  order. Text sorts case-insensitively; dates sort chronologically (bare SQLite timestamps
+  are assumed UTC for comparison only). Missing/unrecognized dates sort last in both
+  directions, with stable source order for ties. The chosen sort survives refresh, tab
+  reopening, and session selection within the app run; sorting never triggers a database read.
+  Completed rows remain visible. Unknown statuses are preserved; blank/null
   statuses are counted under `(No status)`. Titles absent from rows display `(No title)`.
 - Each read discovers available columns in `todos` and selects only recognized fields
-  (`id`, `title`, `description`, `status`). Added/reordered columns are harmless; missing fields
+  (`id`, `title`, `description`, `status`, `created_at`, `updated_at`). Added/reordered columns are harmless; missing fields
   produce a warning while available fields remain visible. No recognizable display fields means
   unsupported schema, not a list of invented rows. Renamed columns/tables are not guessed.
 - Ordinary tables use rowid order. `WITHOUT ROWID` tables use their declared primary-key order,
@@ -106,7 +114,7 @@ stored fields it exposes computed **projections**:
 | `SessionStartInfo` | copilot version, context tier, producer, start time, cwd, already-in-use, effective model + reasoning effort, first user prompt | `events.jsonl` head |
 | `CheckpointInfo` | number, title, file path, timestamp | `checkpoints/` |
 | `SnapshotInfo` | snapshot id, session id, timestamp (raw + parsed), cwd, branch, file path, `SourceTrigger` (`ask_user`/`handoff`/`task_complete`/`long_turn`/`on_demand`/`checkpoint`) | `status-snapshots/index.db` |
-| `SessionTodo` | id, title, description, raw status (known and unfamiliar values) | `session.db` |
+| `SessionTodo` | id, title, description, raw status, created_at and updated_at as stored strings | `session.db` |
 | `SessionTodosResult` | rows, `Status` (`Success`/`MissingDatabase`/`MissingTable`/`UnsupportedSchema`/`Unavailable`), missing fields, message | one explicit todo read |
 | `JournalEntry` | time, session id, branch, cwd, activity | `journal/<YYYY-MM>.md` |
 | `SessionGroup` | `ObservableCollection<SessionInfo>` + `Key` header text | built by `MainViewModel` |
@@ -161,7 +169,7 @@ screenshotted with **zero** proprietary information. Shape (locked by unit tests
 
 - **15 sessions**, exactly **6 detailed** (ids ending 01/03/05/07/09/12).
 - Each detailed session seeds **3 checkpoints**, **3 snapshots** (`SnapshotCount = 3`), **4 todos**
-  (`done`, `done`, `in_progress`, `pending`) with synthetic descriptions.
+  (`done`, `done`, `in_progress`, `pending`) with descriptive IDs, synthetic descriptions, and timestamps.
 - Plain (non-detailed) sessions carry no detail collections.
 - Every row sets `HasEvents = IsEnriched = true`, so the default **hide empty sessions** filter never
   hides a demo row. Six rows are deliberately **unnamed** (render as a UUID), which also exercises the

@@ -497,9 +497,9 @@
                              TabWidthMode="SizeToContent" IsAddTabButtonVisible="False"
                              CanDragTabs="False" CanReorderTabs="False">
                         <TabView.Resources>
-                            <!-- Keep native tab semantics and keyboard navigation; larger
-                                 headers and a selected underline distinguish tabs from actions. -->
-                            <x:Double x:Key="TabViewItemMinHeight">48</x:Double>
+                            <!-- Compact headers retain native tab navigation and a
+                                 selected underline instead of button-like action styling. -->
+                            <x:Double x:Key="TabViewItemMinHeight">36</x:Double>
                             <x:Double x:Key="TabViewItemMinWidth">144</x:Double>
                         </TabView.Resources>
                         <TabView.TabStripFooter>
@@ -508,7 +508,7 @@
                         </TabView.TabStripFooter>
                         <TabViewItem IsClosable="False" AutomationProperties.Name="Details">
                             <TabViewItem.Header>
-                                <Grid MinWidth="112" Height="46">
+                                <Grid MinWidth="112" Height="28">
                                     <TextBlock Text="Details" FontSize="16" FontWeight="SemiBold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     <Border Height="3" CornerRadius="1" VerticalAlignment="Bottom"
@@ -516,7 +516,7 @@
                                             Visibility="{x:Bind ViewModel.Details.IsDetailsTabSelected, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
                                 </Grid>
                             </TabViewItem.Header>
-                    <ScrollViewer Padding="12,16,12,0"
+                    <ScrollViewer Padding="8,8,8,0"
                                   BorderThickness="0,1,0,0"
                                   BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
                         <StackPanel Spacing="16">
@@ -621,7 +621,7 @@
                         </TabViewItem>
                         <TabViewItem IsClosable="False" AutomationProperties.Name="Agent tasks">
                             <TabViewItem.Header>
-                                <Grid MinWidth="112" Height="46">
+                                <Grid MinWidth="112" Height="28">
                                     <TextBlock Text="Agent tasks" FontSize="16" FontWeight="SemiBold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     <Border Height="3" CornerRadius="1" VerticalAlignment="Bottom"
@@ -630,9 +630,9 @@
                                 </Grid>
                             </TabViewItem.Header>
                             <!-- ASSUMPTION: only selecting this tab authorizes a todo read.
-                                 Keep the ListView constrained, with no outer ScrollViewer,
-                                 so long todo tables retain item virtualization. -->
-                            <Grid Padding="12,16,12,0" RowSpacing="8"
+                                 Horizontal table scrolling must not unbound the vertical
+                                 ListView viewport, which preserves row virtualization. -->
+                            <Grid Padding="8,8,8,0" RowSpacing="4"
                                   BorderThickness="0,1,0,0"
                                   BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
                                 <Grid.RowDefinitions>
@@ -645,12 +645,12 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="Work tracked by Copilot for this session. Read-only."
-                                                   TextWrapping="Wrap"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <StackPanel Spacing="2">
                                         <TextBlock Text="{x:Bind ViewModel.Details.Todos.CountsText, Mode=OneWay}"
                                                    TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                                        <TextBlock Text="Copilot's work list (read-only). Timestamps are shown as stored."
+                                                   FontSize="12" TextWrapping="Wrap"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
                                     <Button Grid.Column="1" Content="Refresh"
                                             Command="{x:Bind ViewModel.Details.Todos.RefreshCommand}"
@@ -669,7 +669,66 @@
                                                Visibility="{x:Bind ViewModel.Details.Todos.Warning, Mode=OneWay, Converter={StaticResource StringToVis}}"
                                                TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
-                                <ListView Grid.Row="2"
+                                <ScrollViewer Grid.Row="2" HorizontalScrollMode="Enabled"
+                                              HorizontalScrollBarVisibility="Auto"
+                                              VerticalScrollMode="Disabled"
+                                              VerticalScrollBarVisibility="Disabled"
+                                              SizeChanged="OnTaskTableViewportSizeChanged"
+                                              AutomationProperties.Name="Agent task table columns">
+                                <Grid x:Name="AgentTaskTable" Width="1186">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <!-- Header and row widths match; the description absorbs
+                                         additional viewport width without truncating text. -->
+                                    <Grid Padding="8,6" ColumnSpacing="12"
+                                          Background="{ThemeResource LayerFillColorDefaultBrush}">
+                                        <Grid.Resources>
+                                            <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderThickness" Value="0" />
+                                                <Setter Property="Padding" Value="0,2" />
+                                                <Setter Property="MinHeight" Value="24" />
+                                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                            </Style>
+                                        </Grid.Resources>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="190" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="150" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Content="{x:Bind ViewModel.Details.Todos.IdHeader, Mode=OneWay}"
+                                                Command="{x:Bind ViewModel.Details.Todos.SortCommand}"
+                                                CommandParameter="{x:Bind models:SessionTodoSortColumn.Id}"
+                                                ToolTipService.ToolTip="Sort by ID; click again to reverse" />
+                                        <Button Grid.Column="1" Content="{x:Bind ViewModel.Details.Todos.TitleHeader, Mode=OneWay}"
+                                                Command="{x:Bind ViewModel.Details.Todos.SortCommand}"
+                                                CommandParameter="{x:Bind models:SessionTodoSortColumn.Title}"
+                                                ToolTipService.ToolTip="Sort by title; click again to reverse" />
+                                        <Button Grid.Column="2" Content="{x:Bind ViewModel.Details.Todos.DescriptionHeader, Mode=OneWay}"
+                                                Command="{x:Bind ViewModel.Details.Todos.SortCommand}"
+                                                CommandParameter="{x:Bind models:SessionTodoSortColumn.Description}"
+                                                ToolTipService.ToolTip="Sort by description; click again to reverse" />
+                                        <Button Grid.Column="3" Content="{x:Bind ViewModel.Details.Todos.StatusHeader, Mode=OneWay}"
+                                                Command="{x:Bind ViewModel.Details.Todos.SortCommand}"
+                                                CommandParameter="{x:Bind models:SessionTodoSortColumn.Status}"
+                                                ToolTipService.ToolTip="Sort by status; click again to reverse" />
+                                        <Button Grid.Column="4" Content="{x:Bind ViewModel.Details.Todos.CreatedHeader, Mode=OneWay}"
+                                                Command="{x:Bind ViewModel.Details.Todos.SortCommand}"
+                                                CommandParameter="{x:Bind models:SessionTodoSortColumn.Created}"
+                                                ToolTipService.ToolTip="Sort by created date; click again to reverse" />
+                                        <Button Grid.Column="5" Content="{x:Bind ViewModel.Details.Todos.UpdatedHeader, Mode=OneWay}"
+                                                Command="{x:Bind ViewModel.Details.Todos.SortCommand}"
+                                                CommandParameter="{x:Bind models:SessionTodoSortColumn.Updated}"
+                                                ToolTipService.ToolTip="Sort by updated date; click again to reverse" />
+                                    </Grid>
+                                <ListView Grid.Row="1"
                                           ItemsSource="{x:Bind ViewModel.Details.Todos.Items, Mode=OneWay}"
                                           SelectionMode="None" IsItemClickEnabled="False"
                                           AutomationProperties.Name="Session agent tasks"
@@ -678,34 +737,41 @@
                                     <ListView.ItemContainerStyle>
                                         <Style TargetType="ListViewItem">
                                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="Margin" Value="0" />
                                         </Style>
                                     </ListView.ItemContainerStyle>
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="models:SessionTodo">
-                                            <Grid ColumnSpacing="12" Padding="0,8">
+                                            <Grid ColumnSpacing="12" Padding="8,6"
+                                                  BorderThickness="0,0,0,1"
+                                                  BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="190" />
                                                     <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="110" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="150" />
                                                 </Grid.ColumnDefinitions>
-                                                <Border Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                                        CornerRadius="4" Padding="6,2"
-                                                        VerticalAlignment="Top" HorizontalAlignment="Left">
-                                                    <TextBlock Text="{x:Bind DisplayStatus}" FontSize="12"
-                                                               TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                                                </Border>
-                                                <StackPanel Grid.Column="1" Spacing="4">
-                                                    <TextBlock Text="{x:Bind DisplayTitle}"
-                                                               Style="{StaticResource BodyStrongTextBlockStyle}"
-                                                               TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                                                    <TextBlock Text="{x:Bind Description}"
-                                                               Visibility="{x:Bind Description, Converter={StaticResource StringToVis}}"
-                                                               TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </StackPanel>
+                                                <TextBlock Text="{x:Bind Id, Converter={StaticResource StringOrDash}}"
+                                                           TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                                <TextBlock Grid.Column="1" Text="{x:Bind DisplayTitle}"
+                                                           TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                                <TextBlock Grid.Column="2" Text="{x:Bind Description, Converter={StaticResource StringOrDash}}"
+                                                           TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                                <TextBlock Grid.Column="3" Text="{x:Bind DisplayStatus}"
+                                                           FontWeight="SemiBold" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                                <TextBlock Grid.Column="4" Text="{x:Bind CreatedAt, Converter={StaticResource StringOrDash}}"
+                                                           FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                                <TextBlock Grid.Column="5" Text="{x:Bind UpdatedAt, Converter={StaticResource StringOrDash}}"
+                                                           FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                                             </Grid>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
                                 </ListView>
+                                </Grid>
+                                </ScrollViewer>
                             </Grid>
                         </TabViewItem>
                     </TabView>

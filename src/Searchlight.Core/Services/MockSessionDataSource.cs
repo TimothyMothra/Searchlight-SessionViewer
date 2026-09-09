@@ -244,10 +244,10 @@ public sealed class MockSessionDataSource : ISessionDataSource
 
             _todos[id] =
             [
-                new SessionTodo { Id = "t1", Title = "Reproduce the issue", Description = "Capture the failing scenario with a deterministic synthetic input.", Status = "done" },
-                new SessionTodo { Id = "t2", Title = "Implement the fix", Description = "Update the affected code path while preserving existing behavior.", Status = "done" },
-                new SessionTodo { Id = "t3", Title = "Add a regression test", Description = "Exercise the original failure and the successful retry path. Include cancellation and empty-input cases so future changes cannot silently regress the fix.", Status = "in_progress" },
-                new SessionTodo { Id = "t4", Title = "Update the docs", Description = "Document the behavior and any assumptions that callers need to know.", Status = "pending" },
+                new SessionTodo { Id = "reproduce-issue", Title = "Reproduce the issue", Description = "Capture the failing scenario with a deterministic synthetic input.", Status = "done", CreatedAt = updated.AddMinutes(-30).ToString("u"), UpdatedAt = updated.AddMinutes(-25).ToString("u") },
+                new SessionTodo { Id = "implement-fix", Title = "Implement the fix", Description = "Update the affected code path while preserving existing behavior.", Status = "done", CreatedAt = updated.AddMinutes(-25).ToString("u"), UpdatedAt = updated.AddMinutes(-15).ToString("u") },
+                new SessionTodo { Id = "regression-test", Title = "Add a regression test", Description = "Exercise the original failure and the successful retry path. Include cancellation and empty-input cases so future changes cannot silently regress the fix.", Status = "in_progress", CreatedAt = updated.AddMinutes(-15).ToString("u"), UpdatedAt = updated.AddMinutes(-2).ToString("u") },
+                new SessionTodo { Id = "update-docs", Title = "Update the docs", Description = "Document the behavior and any assumptions that callers need to know.", Status = "pending", CreatedAt = updated.AddMinutes(-10).ToString("u"), UpdatedAt = updated.AddMinutes(-10).ToString("u") },
             ];
         }
 

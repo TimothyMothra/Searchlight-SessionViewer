@@ -85,6 +85,14 @@ public sealed partial class MainView : UserControl
         }
     }
 
+    private void OnTaskTableViewportSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // ASSUMPTION: six readable columns need at least 1186 DIP. An explicit
+        // finite width keeps wrapped cells bounded in the horizontal ScrollViewer.
+        if (AgentTaskTable is not null)
+            AgentTaskTable.Width = Math.Max(1186, e.NewSize.Width);
+    }
+
     /// <summary>
     /// Clicking a tick in the compact rail scrolls the list straight to that group's
     /// first session — the rail acts like a jump-to-group second scrollbar.

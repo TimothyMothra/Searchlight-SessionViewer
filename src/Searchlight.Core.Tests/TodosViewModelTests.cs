@@ -8,6 +8,50 @@ namespace Searchlight.Core.Tests;
 public sealed class TodosViewModelTests
 {
     [Fact]
+    public async Task Sorting_DefaultsToUpdatedDescending_AndSurvivesRefreshWithoutExtraReads()
+    {
+        var source = new TodoSource
+        {
+            Read = (_, _) => new()
+            {
+                Todos = [
+                    new() { Id = "old", Title = "Alpha", UpdatedAt = "2026-09-08 10:00:00" },
+                    new() { Id = "new", Title = "Beta", UpdatedAt = "2026-09-09 10:00:00" },
+                ],
+            },
+        };
+        var vm = new TodosViewModel(source);
+        Assert.Equal(SessionTodoSortColumn.Updated, vm.SortColumn);
+        Assert.True(vm.SortDescending);
+        vm.SetSession(source.Session);
+        vm.SetActive(true);
+        await vm.CurrentLoad;
+        Assert.Equal(["new", "old"], vm.Items.Select(row => row.Id));
+        vm.SortCommand.Execute(SessionTodoSortColumn.Updated);
+        Assert.False(vm.SortDescending);
+        Assert.Equal(["old", "new"], vm.Items.Select(row => row.Id));
+        vm.SortCommand.Execute(SessionTodoSortColumn.Title);
+        Assert.False(vm.SortDescending);
+        vm.SortCommand.Execute(SessionTodoSortColumn.Title);
+        Assert.True(vm.SortDescending);
+        Assert.Equal(["new", "old"], vm.Items.Select(row => row.Id));
+        Assert.Equal(1, source.Calls);
+        await vm.RefreshCommand.ExecuteAsync(null);
+        Assert.Equal(2, source.Calls);
+        Assert.Equal(SessionTodoSortColumn.Title, vm.SortColumn);
+        Assert.True(vm.SortDescending);
+        Assert.EndsWith("\u2193", vm.TitleHeader);
+        Assert.Equal("Updated", vm.UpdatedHeader);
+        vm.SetActive(false);
+        vm.SetSession(source.Session with { Id = "another" });
+        vm.SetActive(true);
+        await vm.CurrentLoad;
+        Assert.Equal(SessionTodoSortColumn.Title, vm.SortColumn);
+        Assert.True(vm.SortDescending);
+        Assert.Equal(["new", "old"], vm.Items.Select(row => row.Id));
+    }
+
+    [Fact]
     public async Task DetailsSelectionAndRefresh_NeverReadTodos()
     {
         var source = new TodoSource();
@@ -251,7 +295,7 @@ public sealed class TodosViewModelTests
         vm.SetSession(source.Session);
         vm.SetActive(true);
         await vm.CurrentLoad;
-        Assert.Same(rows, vm.Items);
+        Assert.Equal(rows, vm.Items);
         Assert.Equal("10000 total | pending: 10000", vm.CountsText);
     }
 

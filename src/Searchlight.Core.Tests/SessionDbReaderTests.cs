@@ -38,9 +38,9 @@ public sealed class SessionDbReaderTests : IDisposable
     public void ReadsDescriptionsAndRawStatuses_InRowIdOrder_WithoutWritingDatabase()
     {
         Execute("""
-            CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT);
-            INSERT INTO todos VALUES ('z', 'First', 'Long description', 'in_progress');
-            INSERT INTO todos VALUES ('a', 'Second', '', 'future_status');
+            CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT, created_at TEXT, updated_at TEXT);
+            INSERT INTO todos VALUES ('z', 'First', 'Long description', 'in_progress', '2026-09-08 10:00:00', '2026-09-08T11:00:00-07:00');
+            INSERT INTO todos VALUES ('a', 'Second', '', 'future_status', NULL, NULL);
             """);
         byte[] before = File.ReadAllBytes(DatabasePath);
         var result = Read();
@@ -49,6 +49,10 @@ public sealed class SessionDbReaderTests : IDisposable
         Assert.Equal(["z", "a"], result.Todos.Select(todo => todo.Id));
         Assert.Equal("Long description", result.Todos[0].Description);
         Assert.Equal("future_status", result.Todos[1].Status);
+        Assert.Equal("2026-09-08 10:00:00", result.Todos[0].CreatedAt);
+        Assert.Equal("2026-09-08T11:00:00-07:00", result.Todos[0].UpdatedAt);
+        Assert.Equal(string.Empty, result.Todos[1].CreatedAt);
+        Assert.Equal(string.Empty, result.Todos[1].UpdatedAt);
         Assert.Equal(before, File.ReadAllBytes(DatabasePath));
     }
 
@@ -56,13 +60,13 @@ public sealed class SessionDbReaderTests : IDisposable
     public void AddedReorderedAndCaseChangedColumns_AreSupported()
     {
         Execute("""
-            CREATE TABLE TODOS (extra TEXT, STATUS TEXT, DESCRIPTION TEXT, TITLE TEXT, ID TEXT);
-            INSERT INTO TODOS VALUES ('ignored', 'blocked', 'Details', 'Task', 'one');
+            CREATE TABLE TODOS (UPDATED_AT TEXT, extra TEXT, STATUS TEXT, DESCRIPTION TEXT, CREATED_AT TEXT, TITLE TEXT, ID TEXT);
+            INSERT INTO TODOS VALUES ('later', 'ignored', 'blocked', 'Details', 'earlier', 'Task', 'one');
             """);
         var result = Read();
         Assert.Equal(SessionTodosStatus.Success, result.Status);
         Assert.Empty(result.MissingFields);
-        Assert.Equal(new SessionTodo { Id = "one", Title = "Task", Description = "Details", Status = "blocked" },
+        Assert.Equal(new SessionTodo { Id = "one", Title = "Task", Description = "Details", Status = "blocked", CreatedAt = "earlier", UpdatedAt = "later" },
             Assert.Single(result.Todos));
     }
 
@@ -76,7 +80,7 @@ public sealed class SessionDbReaderTests : IDisposable
         Execute($"CREATE TABLE todos ({column} TEXT); INSERT INTO todos VALUES ('{value}');");
         var result = Read();
         Assert.Equal(SessionTodosStatus.Success, result.Status);
-        Assert.Equal(3, result.MissingFields.Count);
+        Assert.Equal(5, result.MissingFields.Count);
         var todo = Assert.Single(result.Todos);
         Assert.Equal(column == "title" ? value : string.Empty, todo.Title);
         Assert.Equal(column == "description" ? value : string.Empty, todo.Description);
@@ -110,6 +114,26 @@ public sealed class SessionDbReaderTests : IDisposable
         Assert.Equal(SessionTodosStatus.UnsupportedSchema, result.Status);
         Assert.Empty(result.Todos);
         Assert.NotNull(result.Message);
+    }
+
+    [Fact]
+    public void TimestampOnlySchema_IsStillUnsupported()
+    {
+        Execute("CREATE TABLE todos (id TEXT, created_at TEXT, updated_at TEXT);");
+        Assert.Equal(SessionTodosStatus.UnsupportedSchema, Read().Status);
+    }
+
+    [Fact]
+    public void MissingTimestampColumns_DoNotHideLegacyRows()
+    {
+        Execute("CREATE TABLE todos (id TEXT, title TEXT, description TEXT, status TEXT); INSERT INTO todos VALUES ('id', 'Task', 'Detail', 'done');");
+        var result = Read();
+        Assert.Equal(SessionTodosStatus.Success, result.Status);
+        Assert.Equal(["created_at", "updated_at"], result.MissingFields);
+        var todo = Assert.Single(result.Todos);
+        Assert.Equal("Task", todo.Title);
+        Assert.Empty(todo.CreatedAt);
+        Assert.Empty(todo.UpdatedAt);
     }
 
     [Fact]

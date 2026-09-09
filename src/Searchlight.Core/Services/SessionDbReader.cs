@@ -10,7 +10,7 @@ namespace Searchlight.Services;
 /// </summary>
 public sealed class SessionDbReader
 {
-    private static readonly string[] TodoFields = ["id", "title", "description", "status"];
+    private static readonly string[] TodoFields = ["id", "title", "description", "status", "created_at", "updated_at"];
 
     /// <summary>Reads only recognized todo columns; never reads unused session_state values.</summary>
     public SessionTodosResult ReadTodos(string folderPath, CancellationToken token = default)
@@ -126,7 +126,7 @@ public sealed class SessionDbReader
         }
 
         string[] missing = TodoFields.Where(field => !columns.Contains(field)).ToArray();
-        if (!TodoFields.Skip(1).Any(columns.Contains))
+        if (!new[] { "title", "description", "status" }.Any(columns.Contains))
         {
             return new()
             {
@@ -159,6 +159,8 @@ public sealed class SessionDbReader
                     Title = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
                     Description = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
                     Status = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    CreatedAt = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                    UpdatedAt = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
                 });
             }
         }

@@ -15,6 +15,11 @@ public sealed record SessionTodo
     /// <summary>Raw lifecycle status; unfamiliar values are preserved.</summary>
     public string Status { get; init; } = string.Empty;
 
+    // ASSUMPTION: timestamp formats and timezone conventions can change with
+    // Copilot's schema. Preserve the source text rather than invent a timezone.
+    public string CreatedAt { get; init; } = string.Empty;
+    public string UpdatedAt { get; init; } = string.Empty;
+
     public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? "(No title)" : Title;
     public string DisplayStatus => string.IsNullOrWhiteSpace(Status) ? "(No status)" : Status;
 }

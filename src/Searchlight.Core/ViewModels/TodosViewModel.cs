@@ -20,13 +20,48 @@ public sealed partial class TodosViewModel(ISessionDataSource source) : Observab
     private bool _isLoading;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Items), nameof(Message), nameof(Warning))]
+    [NotifyPropertyChangedFor(nameof(Message), nameof(Warning))]
     private SessionTodosResult? _result;
 
     [ObservableProperty]
     private string _countsText = string.Empty;
 
-    public IReadOnlyList<SessionTodo> Items => Result?.Todos ?? [];
+    public IReadOnlyList<SessionTodo> Items { get; private set; } = [];
+    public SessionTodoSortColumn SortColumn { get; private set; } = SessionTodoSortColumn.Updated;
+    public bool SortDescending { get; private set; } = true;
+    public string IdHeader => Header("ID", SessionTodoSortColumn.Id);
+    public string TitleHeader => Header("Title", SessionTodoSortColumn.Title);
+    public string DescriptionHeader => Header("Description", SessionTodoSortColumn.Description);
+    public string StatusHeader => Header("Status", SessionTodoSortColumn.Status);
+    public string CreatedHeader => Header("Created", SessionTodoSortColumn.Created);
+    public string UpdatedHeader => Header("Updated", SessionTodoSortColumn.Updated);
+
+    private string Header(string title, SessionTodoSortColumn column) =>
+        title + (SortColumn == column ? (SortDescending ? " \u2193" : " \u2191") : string.Empty);
+
+    partial void OnResultChanged(SessionTodosResult? value) => ApplySort();
+
+    [RelayCommand]
+    private void Sort(SessionTodoSortColumn column)
+    {
+        if (!Enum.IsDefined(column)) throw new ArgumentOutOfRangeException(nameof(column));
+        SortDescending = column == SortColumn ? !SortDescending
+            : column is SessionTodoSortColumn.Created or SessionTodoSortColumn.Updated;
+        SortColumn = column;
+        OnPropertyChanged(nameof(SortColumn));
+        OnPropertyChanged(nameof(SortDescending));
+        foreach (string property in new[] { nameof(IdHeader), nameof(TitleHeader), nameof(DescriptionHeader),
+                     nameof(StatusHeader), nameof(CreatedHeader), nameof(UpdatedHeader) })
+            OnPropertyChanged(property);
+        ApplySort();
+    }
+
+    private void ApplySort()
+    {
+        Items = SessionTodoSort.Apply(Result?.Todos ?? [], SortColumn, SortDescending);
+        OnPropertyChanged(nameof(Items));
+    }
+
     public string? Message => Result is null ? null
         : Result.Status == SessionTodosStatus.Success
             ? (Result.Todos.Count == 0 ? "Copilot has not recorded any tasks for this session." : null)
