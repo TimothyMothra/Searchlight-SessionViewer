@@ -178,12 +178,13 @@ public sealed partial class DetailsViewModel : ObservableObject
 
         string? command = _resume.Resume(Session.Id, Session.DisplayName);
         bool ok = !string.IsNullOrEmpty(command);
+        string error = _resume.LastError ?? "Could not launch a terminal to resume this session.";
         StatusMessage = ok
             ? $"Resuming {Session.ShortId}…"
-            : "Could not launch a terminal to resume this session.";
+            : error;
         LastActionText = ok
             ? $"Resumed session: {command}"
-            : $"Resume failed: could not launch a terminal for {Session.Id}";
+            : $"Resume failed: {error}";
     }
 
     private bool CanResume() => Session is not null;

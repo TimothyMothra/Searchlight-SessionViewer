@@ -8,6 +8,9 @@ namespace Searchlight.Abstractions;
 /// </summary>
 public interface IResumeLauncher
 {
+    /// <summary>Actionable failure from the most recent attempt, when available.</summary>
+    string? LastError => null;
+
     /// <summary>
     /// Resumes the session with id <paramref name="sessionId"/>, optionally titling
     /// the terminal tab <paramref name="tabTitle"/>. Returns the launched CLI command

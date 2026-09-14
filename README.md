@@ -52,7 +52,18 @@ Requires the **.NET 10 SDK** (pinned via `global.json`) on Windows.
 | No tray | append `--no-tray` | Live `~/.copilot` |
 | Demo / mock | `Demo` build config, or `--demo` flag | Synthetic (15 sessions) |
 
-## Install & launch (no dev tools needed)
+## MSIX distribution and local review
+
+Build and sideload **Searchlight Dev** alongside the production package. The channels
+have separate app identities and share settings and notes in `%USERPROFILE%\.searchlight`.
+See [MSIX builds and signing](docs/msix.md) for certificate setup and the complete workflow.
+
+```powershell
+$build = .\tools\Build-Msix.ps1 -CertificateThumbprint '<your-development-certificate-thumbprint>'
+.\tools\Install-DevMsix.ps1 -Path $build.Path
+```
+
+## Unpackaged install & launch
 
 To run Searchlight without `dotnet run` — from the Start Menu, a desktop icon, or automatically at
 login — use the installer script. It publishes a **self-contained** build (no .NET runtime required
@@ -90,6 +101,7 @@ Full knowledge base in [`docs/`](./docs/README.md):
 - [architecture.md](./docs/architecture.md) — layered architecture, DI composition root, data flow
 - [engineering.md](./docs/engineering.md) — build configs, compile flags, run modes, commands
 - [data-model.md](./docs/data-model.md) — `~/.copilot` sources and the in-memory domain model
+- [msix.md](./docs/msix.md) — package identities, shared data, signing, and Dev sideloads
 
 ## License
 

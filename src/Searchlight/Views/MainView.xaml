@@ -21,6 +21,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -29,8 +30,19 @@
              via ExtendsContentIntoTitleBar in MainWindow, so this dark strip fills
              that space and carries the single app label. Right padding reserves room
              for the min/max/close caption buttons that overlay the top-right. -->
-        <Grid x:Name="AppTitleBar" Grid.Row="0" Height="40" Padding="16,0,150,0">
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <Grid Grid.Row="0" Height="40" Padding="16,0,150,0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <!-- ASSUMPTION: only the label region is draggable; title bar actions
+                 must remain outside SetTitleBar's non-client input region. -->
+            <Grid x:Name="AppTitleBar" Background="Transparent" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
                 <!-- UAC shield: shown only when the app runs elevated, like Windows Terminal.
                      Placed at the far left (before the app icon), drawn white to stay subtle.
                      OneTime x:Bind — elevation is fixed for the process lifetime. -->
@@ -38,121 +50,217 @@
                           VerticalAlignment="Center"
                           ToolTipService.ToolTip="Running as administrator"
                           Visibility="{x:Bind IsElevated, Converter={StaticResource BoolToVis}}" />
-                <Image Source="{x:Bind AppIconSource}" Width="18" Height="18"
+                <Image Grid.Column="1" Source="{x:Bind AppIconSource}" Width="18" Height="18"
                        VerticalAlignment="Center" />
-                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}"
-                           VerticalAlignment="Center">
-                    <Run Text="Searchlight" />
+                <TextBlock Grid.Column="2" Style="{StaticResource BodyStrongTextBlockStyle}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                    <Run Text="{x:Bind AppDisplayName}" />
                     <Run Text="   Historical Session Viewer"
                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                          FontWeight="Normal" />
                 </TextBlock>
+            </Grid>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4"
+                        VerticalAlignment="Center">
+                <Button x:Name="SettingsButton" Click="OnSettingsClick"
+                        Background="Transparent" BorderThickness="0" Padding="8"
+                        AutomationProperties.Name="Settings" ToolTipService.ToolTip="Settings">
+                    <FontIcon Glyph="&#xE713;" FontSize="16" />
+                </Button>
+                <Button x:Name="InformationButton" Click="OnInformationClick"
+                        Background="Transparent" BorderThickness="0" Padding="8"
+                        AutomationProperties.Name="Information" ToolTipService.ToolTip="Information">
+                    <FontIcon Glyph="&#xE946;" FontSize="16" />
+                </Button>
             </StackPanel>
+        </Grid>
 
-            <!-- Settings gear, right-aligned but left of the caption buttons (reserved
-                 by the 150px right padding). Opens a flyout with the resume behavior toggle. -->
-            <Button HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Background="Transparent" BorderThickness="0"
-                    Padding="8" ToolTipService.ToolTip="Settings">
-                <FontIcon Glyph="&#xE713;" FontSize="16" />
-                <Button.Flyout>
-                    <Flyout>
-                        <!-- The default FlyoutPresenter caps its content at
-                             FlyoutThemeMaxWidth (456px) and pads 12px per side, so a
-                             panel wider than that overflows into a HORIZONTAL
-                             scrollbar. Widening the inner panel alone therefore makes
-                             things worse, not better — the presenter itself has to be
-                             widened. Horizontal scrolling is disabled outright so long
-                             text can only ever wrap, whatever the content width. -->
-                        <Flyout.FlyoutPresenterStyle>
-                            <Style TargetType="FlyoutPresenter"
-                                   BasedOn="{StaticResource DefaultFlyoutPresenterStyle}">
-                                <Setter Property="MinWidth" Value="600" />
-                                <Setter Property="MaxWidth" Value="600" />
-                                <Setter Property="ScrollViewer.HorizontalScrollMode" Value="Disabled" />
-                                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
-                            </Style>
-                        </Flyout.FlyoutPresenterStyle>
+        <InfoBar Grid.Row="1" Severity="Warning" IsClosable="False"
+                 IsOpen="{x:Bind ViewModel.HasPersistenceNotice, Mode=OneWay}"
+                 Title="Shared data needs attention"
+                 Message="{x:Bind ViewModel.PersistenceNotice, Mode=OneWay}" />
 
-                        <!-- No explicit Width: the panel stretches to the presenter's
-                             inner width, so content can never exceed it. -->
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="Settings"
-                                       Style="{StaticResource SubtitleTextBlockStyle}" />
-                            <TextBlock Text="Reuse my existing terminal window"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+        <Grid x:Name="ApplicationPane" Grid.Row="2" Grid.RowSpan="3"
+              Visibility="Collapsed">
+            <Grid.KeyboardAccelerators>
+                <KeyboardAccelerator Key="Escape" Invoked="OnPaneEscape" />
+            </Grid.KeyboardAccelerators>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <StackPanel Orientation="Horizontal" Spacing="16" Margin="16,12,16,16">
+                <Button x:Name="BackButton" Click="OnBackClick"
+                        AutomationProperties.Name="Back to sessions"
+                        ToolTipService.ToolTip="Back to sessions (Esc)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE72B;" FontSize="14" />
+                        <TextBlock Text="Back" />
+                    </StackPanel>
+                </Button>
+                <TextBlock x:Name="PaneTitle" Style="{StaticResource SubtitleTextBlockStyle}"
+                           VerticalAlignment="Center" AutomationProperties.HeadingLevel="Level1" />
+            </StackPanel>
+            <ScrollViewer x:Name="SettingsPane" Grid.Row="1" Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          HorizontalScrollMode="Disabled" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="8" Margin="24,0,24,32">
+                    <TextBlock Text="Changes are saved automatically."
+                               TextWrapping="Wrap" Margin="0,0,0,16"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="Reuse my existing terminal window"
+                               Style="{StaticResource BodyStrongTextBlockStyle}"
+                               TextWrapping="Wrap" />
+                    <TextBlock TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="When on, resuming a session opens a new tab in your most-recently-used Windows Terminal window (a new one is created only if none is open). When off, each resume opens its own new window." />
+                    <ToggleSwitch MinWidth="0" AutomationProperties.Name="Reuse my existing terminal window"
+                                  OnContent="On" OffContent="Off"
+                                  IsOn="{x:Bind ViewModel.Settings.Current.UseSharedTerminalWindow, Mode=TwoWay}" />
+
+                    <!-- Elevation opt-in. Needed when the user's main Terminal
+                         runs as Admin: matching integrity level lets `wt -w`
+                         reuse that window. Flipping on relaunches elevated. -->
+                    <TextBlock Text="Run as administrator"
+                               Style="{StaticResource BodyStrongTextBlockStyle}"
+                               TextWrapping="Wrap" Margin="0,8,0,0" />
+                    <TextBlock TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="Turn on if your main Terminal runs as Administrator. The app restarts elevated (one UAC prompt) so resumed tabs can share your Admin Terminal window. Turning off applies on the next launch." />
+                    <ToggleSwitch MinWidth="0" AutomationProperties.Name="Run as administrator"
+                                  OnContent="On" OffContent="Off"
+                                  IsEnabled="{x:Bind CanChangeElevation}"
+                                  IsOn="{x:Bind ViewModel.Settings.Current.RunElevated, Mode=TwoWay}" />
+                    <TextBlock Text="Administrator mode is disabled for this launch. Your saved preference is unchanged."
+                               TextWrapping="Wrap"
+                               Visibility="{x:Bind HasElevationOverride, Converter={StaticResource BoolToVis}}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                    <Border Margin="0,16,0,16" Padding="16"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="8">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Resume command" Style="{StaticResource SubtitleTextBlockStyle}"
+                                       AutomationProperties.HeadingLevel="Level2" />
+                            <TextBlock Text="Choose the command run inside the terminal. Terminal reuse and administrator settings above still apply."
                                        TextWrapping="Wrap" />
-                            <TextBlock TextWrapping="Wrap"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       Text="When on, resuming a session opens a new tab in your most-recently-used Windows Terminal window (a new one is created only if none is open). When off, each resume opens its own new window." />
-                            <ToggleSwitch MinWidth="0"
-                                          OnContent="On" OffContent="Off"
-                                          IsOn="{x:Bind ViewModel.Settings.Current.UseSharedTerminalWindow, Mode=TwoWay}" />
-
-                            <!-- Elevation opt-in. Needed when the user's main Terminal
-                                 runs as Admin: matching integrity level lets `wt -w`
-                                 reuse that window. Flipping on relaunches elevated. -->
-                            <TextBlock Text="Run as administrator"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}"
-                                       TextWrapping="Wrap" Margin="0,8,0,0" />
-                            <TextBlock TextWrapping="Wrap"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       Text="Turn on if your main Terminal runs as Administrator. The app restarts elevated (one UAC prompt) so resumed tabs can share your Admin Terminal window. Turning off applies on the next launch." />
-                            <ToggleSwitch MinWidth="0"
-                                          OnContent="On" OffContent="Off"
-                                          IsEnabled="{x:Bind CanChangeElevation}"
-                                          IsOn="{x:Bind ViewModel.Settings.Current.RunElevated, Mode=TwoWay}" />
-                            <TextBlock Text="Administrator mode is disabled for this launch. Your saved preference is unchanged."
-                                       TextWrapping="Wrap"
-                                       Visibility="{x:Bind HasElevationOverride, Converter={StaticResource BoolToVis}}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-
-                            <!-- Yolo opt-in. Appends the yolo flag to resume so the
-                                 resumed session auto-approves all tool actions. -->
-                            <TextBlock Text="Resume with --yolo"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}"
-                                       TextWrapping="Wrap" Margin="0,8,0,0" />
-                            <TextBlock TextWrapping="Wrap"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       Text="When on, resuming a session appends --yolo so it runs with all tool approvals auto-granted (no per-action confirmation). Off by default." />
-                            <ToggleSwitch MinWidth="0"
-                                          OnContent="On" OffContent="Off"
+                            <ToggleSwitch Header="Resume with --yolo" MinWidth="0"
+                                          AutomationProperties.Name="Resume with --yolo"
+                                          IsEnabled="{x:Bind ViewModel.IsDefaultResumeCommand, Mode=OneWay}"
                                           IsOn="{x:Bind ViewModel.Settings.Current.AppendYolo, Mode=TwoWay}" />
-
-                            <!-- Session-list hide filters. Each description must stand
-                                 on its own: a setting that explains itself in terms of
-                                 another setting can't be read or reasoned about
-                                 independently, so the shared facts (excluded from
-                                 search; pinned/renamed always visible) are stated in
-                                 full on both rather than cross-referenced. -->
-                            <TextBlock Text="Hide empty sessions"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}"
-                                       TextWrapping="Wrap" Margin="0,8,0,0" />
-                            <TextBlock TextWrapping="Wrap"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       Text="Hides sessions that never held a conversation — the folders Copilot creates whenever a project is opened. They contain no messages, so nothing is lost. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
-                            <ToggleSwitch MinWidth="0"
-                                          OnContent="On" OffContent="Off"
-                                          IsOn="{x:Bind ViewModel.Settings.Current.HideEmptySessions, Mode=TwoWay}" />
-
-                            <TextBlock Text="Hide unnamed sessions"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}"
-                                       TextWrapping="Wrap" Margin="0,8,0,0" />
-                            <TextBlock TextWrapping="Wrap"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       Text="Hides sessions that show only a UUID because they were never named. Some of these do hold real conversations. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
-                            <ToggleSwitch MinWidth="0"
-                                          OnContent="On" OffContent="Off"
-                                          IsOn="{x:Bind ViewModel.Settings.Current.HideUnnamedSessions, Mode=TwoWay}" />
+                            <TextBlock Text="For the default command, --yolo grants all tool approvals automatically. In custom mode, include any desired flags in your template yourself."
+                                       TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <ToggleSwitch Header="Use a custom command" MinWidth="0"
+                                          AutomationProperties.Name="Use a custom resume command"
+                                          IsOn="{x:Bind ViewModel.Settings.Current.UseCustomResumeCommand, Mode=TwoWay}" />
+                            <TextBox Header="Custom command template" FontFamily="Consolas"
+                                     AutomationProperties.Name="Custom resume command template"
+                                     TextWrapping="Wrap" AcceptsReturn="False"
+                                     IsEnabled="{x:Bind ViewModel.Settings.Current.UseCustomResumeCommand, Mode=OneWay}"
+                                     Text="{x:Bind ViewModel.Settings.Current.CustomResumeCommand, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Text="Use {sessionId} for the selected session ID. Enter a single-line cmd.exe command (up to 3000 characters). Nothing runs until you choose Resume."
+                                       TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <InfoBar Severity="Warning" IsClosable="False"
+                                     IsOpen="{x:Bind ViewModel.HasResumeCommandError, Mode=OneWay}"
+                                     Title="Resume command needs attention"
+                                     Message="{x:Bind ViewModel.ResumeCommandValidationMessage, Mode=OneWay}" />
+                            <TextBlock Text="Command preview" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <Border Padding="12" CornerRadius="4"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}">
+                                <TextBlock FontFamily="Consolas" TextWrapping="Wrap"
+                                           IsTextSelectionEnabled="True"
+                                           AutomationProperties.Name="Resume command preview"
+                                           Text="{x:Bind ViewModel.ResumeCommandPreview, Mode=OneWay}" />
+                            </Border>
+                            <TextBlock Text="The all-zero GUID is a preview placeholder; the actual session ID is inserted when resuming. Custom commands run with Searchlight's current permissions."
+                                       TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Button Content="Restore default command"
+                                    Command="{x:Bind ViewModel.ResetResumeCommandCommand}"
+                                    HorizontalAlignment="Left" />
                         </StackPanel>
-                    </Flyout>
-                </Button.Flyout>
-            </Button>
+                    </Border>
+
+                    <!-- Session-list hide filters. Each description must stand
+                         on its own: a setting that explains itself in terms of
+                         another setting can't be read or reasoned about
+                         independently, so the shared facts (excluded from
+                         search; pinned/renamed always visible) are stated in
+                         full on both rather than cross-referenced. -->
+                    <TextBlock Text="Hide empty sessions"
+                               Style="{StaticResource BodyStrongTextBlockStyle}"
+                               TextWrapping="Wrap" Margin="0,8,0,0" />
+                    <TextBlock TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="Hides sessions that never held a conversation — the folders Copilot creates whenever a project is opened. They contain no messages, so nothing is lost. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
+                    <ToggleSwitch MinWidth="0" AutomationProperties.Name="Hide empty sessions"
+                                  OnContent="On" OffContent="Off"
+                                  IsOn="{x:Bind ViewModel.Settings.Current.HideEmptySessions, Mode=TwoWay}" />
+
+                    <TextBlock Text="Hide unnamed sessions"
+                               Style="{StaticResource BodyStrongTextBlockStyle}"
+                               TextWrapping="Wrap" Margin="0,8,0,0" />
+                    <TextBlock TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="Hides sessions that show only a UUID because they were never named. Some of these do hold real conversations. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
+                    <ToggleSwitch MinWidth="0" AutomationProperties.Name="Hide unnamed sessions"
+                                  OnContent="On" OffContent="Off"
+                                  IsOn="{x:Bind ViewModel.Settings.Current.HideUnnamedSessions, Mode=TwoWay}" />
+                </StackPanel>
+            </ScrollViewer>
+            <ScrollViewer x:Name="InformationPane" Grid.Row="1" Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          HorizontalScrollMode="Disabled" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="12" Margin="24,0,24,32">
+                    <TextBlock Text="{x:Bind AppDisplayName}" Style="{StaticResource TitleTextBlockStyle}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="{x:Bind AppVersionText}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="{x:Bind AppChannelText}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <!-- ASSUMPTION: the raw URL remains clickable. -->
+                    <HyperlinkButton NavigateUri="https://github.com/TimothyMothra/Searchlight-SessionViewer"
+                                     HorizontalAlignment="Left" Padding="0"
+                                     AutomationProperties.Name="Open the Searchlight GitHub repository">
+                        <TextBlock Text="https://github.com/TimothyMothra/Searchlight-SessionViewer"
+                                   TextWrapping="Wrap" />
+                    </HyperlinkButton>
+                    <TextBlock Text="Historical Session Viewer for GitHub Copilot"
+                               Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
+                    <TextBlock Text="Browse, search, and resume your local GitHub Copilot sessions from one place."
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Getting started" Margin="0,16,0,0"
+                               Style="{StaticResource SubtitleTextBlockStyle}"
+                               AutomationProperties.HeadingLevel="Level2" />
+                    <TextBlock Text="Search by session name, ID, folder, branch, or prompt. Select a session to see its details, checkpoints, and status snapshots."
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Open the Agent tasks tab to read a fresh snapshot of that session's tasks. Use its Refresh button to update the snapshot."
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Pin important sessions, give them recognizable names, and keep session notes. Pinned and renamed sessions stay visible even when hide filters are enabled."
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Double-click a session or choose Resume to continue it in a terminal. Settings controls terminal reuse, administrator mode, resume approvals, and session visibility."
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Your data" Margin="0,16,0,0"
+                               Style="{StaticResource SubtitleTextBlockStyle}"
+                               AutomationProperties.HeadingLevel="Level2" />
+                    <TextBlock Text="Searchlight reads your local Copilot history from ~/.copilot without modifying it. Production and Dev share settings, pins, display names, and notes under %USERPROFILE%\.searchlight."
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Window and tray" Margin="0,16,0,0"
+                               Style="{StaticResource SubtitleTextBlockStyle}"
+                               AutomationProperties.HeadingLevel="Level2" />
+                    <TextBlock Text="In tray mode, closing or minimizing the window hides it. Use the tray menu to open Searchlight again or exit. In no-tray mode, closing the window exits the app."
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </ScrollViewer>
         </Grid>
 
         <!-- Search + refresh. Both action buttons use the app-wide "<glyph> <label>"
              pattern (see Pin/Rename/Resume) so no control is icon-only. -->
-        <Grid Grid.Row="1" Padding="16,4,16,8" ColumnSpacing="12">
+        <Grid x:Name="SessionSearchBar" Grid.Row="2" Padding="16,4,16,8" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -198,7 +306,7 @@
         </Grid>
 
         <!-- Body: list (left) + details (right) -->
-        <Grid Grid.Row="2">
+        <Grid x:Name="SessionContent" Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="380" MinWidth="300" />
@@ -817,7 +925,7 @@
         </Grid>
 
         <!-- Status bar: session count (left, mirrors the list pane) + most-recent action (right, full text, right-aligned, selectable) -->
-        <Border Grid.Row="3" Padding="16,8"
+        <Border x:Name="SessionStatusBar" Grid.Row="4" Padding="16,8"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                 BorderThickness="0,1,0,0">
@@ -862,7 +970,7 @@
              reads as grabbable; the 28x28 transparent square makes it easy to hit without pixel-hunting,
              while the dot triangle stays visually tucked in the corner. The dot Canvas is
              IsHitTestVisible=False so only the container handles PointerPressed. -->
-        <controls:ResizeGrip Grid.Row="3" x:Name="ResizeGrip"
+        <controls:ResizeGrip Grid.Row="4" x:Name="ResizeGrip"
               Width="28" Height="28"
               HorizontalAlignment="Right" VerticalAlignment="Bottom"
               Background="Transparent"

@@ -59,15 +59,17 @@ public partial class App : Application
     // the normal tray instance (e.g. running Demo for screenshots).
     private System.Threading.Mutex? _instanceMutex;
     private System.Threading.EventWaitHandle? _showWindowSignal;
+    private System.Threading.EventWaitHandle? _exitSignal;
 
-    private const string SingleInstanceMutexName = "Searchlight.SingleInstance.Mutex";
-    private const string ShowWindowEventName = "Searchlight.SingleInstance.ShowWindow";
+    private static readonly string SingleInstanceMutexName = $"{AppIdentity.InstancePrefix}.SingleInstance.Mutex";
+    private static readonly string ShowWindowEventName = $"{AppIdentity.InstancePrefix}.SingleInstance.ShowWindow";
+    private static readonly string ExitEventName = $"{AppIdentity.InstancePrefix}.SingleInstance.Exit";
 
     // ASSUMPTION: temporary diagnostic sink to capture the UI-thread stowed
     // exception (WER shows only 0xc000027b in Microsoft.UI.Xaml.dll). Remove
     // this logging after the black-window/crash is root-caused.
     private static readonly string LogPath =
-        System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Searchlight.log");
+        System.IO.Path.Combine(System.IO.Path.GetTempPath(), AppIdentity.LogFileName);
 
     internal static void Log(string message)
     {
@@ -285,19 +287,19 @@ public partial class App : Application
         // Tray glyph = the app's real .ico (Assets\app.ico, copied to output).
         // TaskbarIcon.IconSource is an ImageSource, so a BitmapImage assigns
         // directly. DecodePixelWidth=32 renders a crisp small tray frame from the
-        // multi-res icon. Use an absolute file path (ms-appx:// does not resolve
-        // for unpackaged WindowsPackageType=None apps).
-        string icoPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+        // multi-res icon. Packaged WinRT loading needs ms-appx URIs; the
+        // unpackaged host still needs absolute paths.
+        // H.NotifyIcon decodes this stream as System.Drawing.Icon, not a PNG bitmap.
         var iconSource = new BitmapImage
         {
-            UriSource = new Uri(icoPath),
+            UriSource = AppIdentity.AssetUri("app.ico"),
             DecodePixelWidth = 32,
             DecodePixelHeight = 32,
         };
 
         _trayIcon = new TaskbarIcon
         {
-            ToolTipText = "Searchlight \u2014 Historical Session Viewer",
+            ToolTipText = $"{AppIdentity.DisplayName} \u2014 Historical Session Viewer",
             IconSource = iconSource,
             ContextFlyout = menu,
             LeftClickCommand = new RelayCommand(ShowWindow),
@@ -342,20 +344,30 @@ public partial class App : Application
         // First instance: listen for later launches asking us to surface the window.
         var signal = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, ShowWindowEventName);
         _showWindowSignal = signal;
+        // ASSUMPTION: an installer requests the same graceful path as tray Exit,
+        // so pending note edits are flushed before the package is replaced.
+        var exitSignal = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, ExitEventName);
+        _exitSignal = exitSignal;
 
         var listener = new System.Threading.Thread(() =>
         {
             while (true)
             {
+                int request;
                 try
                 {
-                    signal.WaitOne();
+                    request = System.Threading.WaitHandle.WaitAny([signal, exitSignal]);
                 }
-                catch
+                catch (ObjectDisposedException)
                 {
                     return; // handle disposed on exit
                 }
 
+                if (request == 1)
+                {
+                    dispatcher.TryEnqueue(ExitApplication);
+                    continue;
+                }
                 dispatcher.TryEnqueue(ShowWindow);
             }
         })
@@ -416,8 +428,15 @@ public partial class App : Application
     /// </summary>
     private void OnSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (NoAdmin || e.PropertyName != nameof(AppSettings.RunElevated))
+        if (NoAdmin || _settingsService?.IsReloading == true ||
+            e.PropertyName != nameof(AppSettings.RunElevated))
         {
+            return;
+        }
+
+        if (_viewModel is not null && !_viewModel.TryFlushNotes())
+        {
+            Log("Settings: restart blocked because pending notes could not be saved or recovered");
             return;
         }
 
@@ -457,6 +476,14 @@ public partial class App : Application
     private void ExitApplication()
     {
         Log("ExitApplication: entered");
+        // ASSUMPTION: shared-note failures can veto shutdown. Do this before
+        // disposing any services so the user can resolve the visible notice and retry.
+        if (_viewModel is not null && !_viewModel.TryFlushNotes())
+        {
+            Log("ExitApplication: blocked because pending notes could not be saved or recovered");
+            ShowWindow();
+            return;
+        }
         _isExiting = true;
 
         // Best-effort graceful teardown. Any single step failing must NOT prevent
@@ -477,10 +504,11 @@ public partial class App : Application
 
         try { Exit(); } catch { }
 
+        try { _exitSignal?.Dispose(); } catch (Exception ex) { Log($"ExitApplication: exit event dispose failed: {ex.Message}"); }
+
         // Guarantee the process actually terminates. For an unpackaged WinUI 3 app,
         // Application.Exit() alone is unreliable when lingering COM/tray references
-        // keep the message loop alive; a hard exit is safe here because this app is
-        // read-only and holds no unsaved state.
+        // keep the message loop alive. Pending note drafts have already been secured.
         Log("ExitApplication: forcing process exit");
         Environment.Exit(0);
     }

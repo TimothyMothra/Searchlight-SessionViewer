@@ -1,93 +1,191 @@
-using System;
-using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Searchlight.Diagnostics;
 using Searchlight.Models;
 
 namespace Searchlight.Services;
 
 /// <summary>
-/// Loads and persists <see cref="AppSettings"/> as JSON under
-/// <c>%LOCALAPPDATA%\Searchlight\settings.json</c>. The in-memory
-/// <see cref="Current"/> instance is observable; any property change is saved
-/// automatically. All I/O is best-effort — a missing or corrupt file simply
-/// yields defaults, and save failures are swallowed (settings are non-critical).
+/// Shared settings with locked, atomic, field-level three-way merges. Each instance
+/// is UI-thread-owned; independent instances/processes synchronize through disk.
 /// </summary>
 public sealed class SettingsService
 {
     private static readonly JsonSerializerOptions s_json = new() { WriteIndented = true };
-
-    // Null path => in-memory only (no disk load, no disk save). Used by tests for
-    // isolation so they never read or clobber the real %LOCALAPPDATA% settings.json.
     private readonly string? _path;
+    private readonly SharedStatePaths? _paths;
+    private AppSettings _observed = new();
 
-    /// <summary>The live settings instance. Bind UI directly to its properties.</summary>
-    public AppSettings Current { get; }
+    public AppSettings Current { get; } = new();
+    /// <summary>True while external values are applied; hosts must not restart on elevation changes then.</summary>
+    public bool IsReloading { get; private set; }
+    public string PersistenceNotice { get; private set; } = string.Empty;
+    public event EventHandler? PersistenceFailed;
 
-    /// <summary>Loads settings from disk (or defaults) and wires auto-save.</summary>
-    public SettingsService()
-        : this(DefaultPath())
+    public SettingsService() : this(SharedStatePaths.Default) { }
+
+    internal SettingsService(SharedStatePaths paths)
     {
+        _paths = paths;
+        _path = paths.SettingsFile;
+        Initialize();
     }
 
-    /// <summary>
-    /// Test/advanced constructor. A non-null <paramref name="path"/> loads from and
-    /// saves to that file; a null path yields an isolated, in-memory-only instance
-    /// (defaults, never touches disk).
-    /// </summary>
+    // Null retains the isolated in-memory seam used by tests and demos.
     internal SettingsService(string? path)
     {
-        _path = path;
-        Current = _path is not null ? Load() : new AppSettings();
-        // Auto-persist whenever any setting changes (e.g. the ToggleSwitch flips).
-        Current.PropertyChanged += (_, _) => Save();
+        _path = path is null ? null : Path.GetFullPath(path);
+        Initialize();
     }
 
-    private static string DefaultPath()
+    private void Initialize()
     {
-        string dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Searchlight");
-        return Path.Combine(dir, "settings.json");
+        Reload();
+        Current.PropertyChanged += (_, _) => { if (!IsReloading) Save(); };
     }
 
-    private AppSettings Load()
+    /// <summary>Loads other instances' changes without discarding locally unsaved edits.</summary>
+    public bool Reload()
     {
+        if (_path is null) return true;
         try
         {
-            if (_path is not null && File.Exists(_path))
+            _paths?.MigrateLegacy();
+            AppSettings merged;
+            using (SharedStateIO.Lock(Path.GetDirectoryName(_path)!))
             {
-                string json = File.ReadAllText(_path);
-                AppSettings? loaded = JsonSerializer.Deserialize<AppSettings>(json, s_json);
-                if (loaded is not null)
-                {
-                    return loaded;
-                }
+                var (_, disk) = Read();
+                merged = Merge(_observed, Current, disk);
+                _observed = Clone(disk);
             }
+            // Bound property callbacks can read notes or save another preference;
+            // release the cross-process lock before notifying any UI observers.
+            Apply(merged);
+            return true;
         }
-        catch (Exception)
+        catch (Exception ex) when (IsStorageError(ex))
         {
-            // Corrupt/unreadable file → fall through to defaults.
+            Report($"Could not reload shared settings at {_path}. Existing data was not replaced.", ex);
+            return false;
         }
-
-        return new AppSettings();
     }
 
-    /// <summary>Writes the current settings to disk (best-effort).</summary>
-    public void Save()
+    /// <summary>Saves changed scalars and individual pin/name edits; returns false with a persistent notice on failure.</summary>
+    public bool Save()
     {
-        if (_path is null)
-        {
-            return; // In-memory (test) instance: never touch disk.
-        }
-
+        if (_path is null) return true;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path, JsonSerializer.Serialize(Current, s_json));
+            _paths?.MigrateLegacy();
+            AppSettings merged;
+            using (SharedStateIO.Lock(Path.GetDirectoryName(_path)!))
+            {
+                var (document, disk) = Read();
+                merged = Merge(_observed, Current, disk);
+                JsonObject known = JsonSerializer.SerializeToNode(merged, s_json)!.AsObject();
+                foreach (var field in known) document[field.Key] = field.Value?.DeepClone();
+                document["SchemaVersion"] = 1;
+                SharedStateIO.WriteAtomic(_path, document.ToJsonString(s_json));
+                _observed = Clone(merged);
+            }
+            Apply(merged);
+            return true;
         }
-        catch (Exception)
+        catch (Exception ex) when (IsStorageError(ex))
         {
-            // Non-critical: settings just won't persist this session.
+            Report($"Could not save shared settings at {_path}. Your changes remain in this window; repair storage and refresh/retry.", ex);
+            return false;
         }
+    }
+
+    private (JsonObject Document, AppSettings Settings) Read()
+    {
+        string? text = SharedStateIO.ReadOptional(_path!);
+        if (text is null) return (new(), new());
+        var document = JsonNode.Parse(text, documentOptions: new() { AllowDuplicateProperties = false }) as JsonObject
+            ?? throw new JsonException("Settings must be a JSON object.");
+        if (document.TryGetPropertyValue("SchemaVersion", out var version)
+            && (version is not JsonValue value || !value.TryGetValue<int>(out int number) || number != 1))
+            throw new JsonException("Unsupported settings schema. Use a compatible Searchlight version.");
+        // Unknown properties survive every write. Known fields must retain their
+        // types; corrupt or newer incompatible state is never replaced by defaults.
+        AppSettings settings = document.Deserialize<AppSettings>(s_json)
+            ?? throw new JsonException("Settings cannot be null.");
+        if (settings.CustomResumeCommand is null)
+            throw new JsonException("CustomResumeCommand cannot be null.");
+        if (settings.PinnedSessionIds is null || settings.PinnedSessionIds.Any(string.IsNullOrWhiteSpace)
+            || settings.CustomSessionNames is null || settings.CustomSessionNames.Any(p => p.Value is null))
+            throw new JsonException("Invalid pin or custom-name data.");
+        return (document, settings);
+    }
+
+    private static AppSettings Clone(AppSettings value) => new()
+    {
+        UseSharedTerminalWindow = value.UseSharedTerminalWindow,
+        RunElevated = value.RunElevated,
+        AppendYolo = value.AppendYolo,
+        UseCustomResumeCommand = value.UseCustomResumeCommand,
+        CustomResumeCommand = value.CustomResumeCommand,
+        NotesPaneVisible = value.NotesPaneVisible,
+        HideEmptySessions = value.HideEmptySessions,
+        HideUnnamedSessions = value.HideUnnamedSessions,
+        PinnedSessionIds = [.. value.PinnedSessionIds],
+        CustomSessionNames = new(value.CustomSessionNames),
+    };
+
+    private static AppSettings Merge(AppSettings baseline, AppSettings local, AppSettings disk)
+    {
+        // ASSUMPTION: same-field settings edits use last-writer-wins; different
+        // fields/IDs merge. Notes deliberately use stricter conflict detection.
+        AppSettings result = Clone(disk);
+        if (local.UseSharedTerminalWindow != baseline.UseSharedTerminalWindow) result.UseSharedTerminalWindow = local.UseSharedTerminalWindow;
+        if (local.RunElevated != baseline.RunElevated) result.RunElevated = local.RunElevated;
+        if (local.AppendYolo != baseline.AppendYolo) result.AppendYolo = local.AppendYolo;
+        if (local.UseCustomResumeCommand != baseline.UseCustomResumeCommand) result.UseCustomResumeCommand = local.UseCustomResumeCommand;
+        if (local.CustomResumeCommand != baseline.CustomResumeCommand) result.CustomResumeCommand = local.CustomResumeCommand;
+        if (local.NotesPaneVisible != baseline.NotesPaneVisible) result.NotesPaneVisible = local.NotesPaneVisible;
+        if (local.HideEmptySessions != baseline.HideEmptySessions) result.HideEmptySessions = local.HideEmptySessions;
+        if (local.HideUnnamedSessions != baseline.HideUnnamedSessions) result.HideUnnamedSessions = local.HideUnnamedSessions;
+        var removed = baseline.PinnedSessionIds.Except(local.PinnedSessionIds).ToHashSet();
+        var added = local.PinnedSessionIds.Except(baseline.PinnedSessionIds).ToArray();
+        result.PinnedSessionIds = [.. added, .. disk.PinnedSessionIds.Where(id => !removed.Contains(id) && !added.Contains(id))];
+        foreach (string id in baseline.CustomSessionNames.Keys.Except(local.CustomSessionNames.Keys))
+            result.CustomSessionNames.Remove(id);
+        foreach (var (id, name) in local.CustomSessionNames)
+            if (!baseline.CustomSessionNames.TryGetValue(id, out string? old) || old != name)
+                result.CustomSessionNames[id] = name;
+        return result;
+    }
+
+    private void Apply(AppSettings value)
+    {
+        IsReloading = true;
+        try
+        {
+            Current.UseSharedTerminalWindow = value.UseSharedTerminalWindow;
+            Current.RunElevated = value.RunElevated;
+            Current.AppendYolo = value.AppendYolo;
+            Current.UseCustomResumeCommand = value.UseCustomResumeCommand;
+            Current.CustomResumeCommand = value.CustomResumeCommand;
+            Current.NotesPaneVisible = value.NotesPaneVisible;
+            Current.HideEmptySessions = value.HideEmptySessions;
+            Current.HideUnnamedSessions = value.HideUnnamedSessions;
+            if (!Current.PinnedSessionIds.SequenceEqual(value.PinnedSessionIds)) Current.PinnedSessionIds = value.PinnedSessionIds;
+            if (Current.CustomSessionNames.Count != value.CustomSessionNames.Count
+                || Current.CustomSessionNames.Any(p => !value.CustomSessionNames.TryGetValue(p.Key, out var name) || name != p.Value))
+                Current.CustomSessionNames = value.CustomSessionNames;
+        }
+        finally { IsReloading = false; }
+    }
+
+    internal static bool IsStorageError(Exception ex) =>
+        ex is IOException or UnauthorizedAccessException or JsonException or System.Security.SecurityException
+            or System.Text.DecoderFallbackException or System.Text.EncoderFallbackException;
+
+    private void Report(string message, Exception ex)
+    {
+        PersistenceNotice = $"{message} {ex.Message}";
+        CoreLog.Write($"{PersistenceNotice} {ex}");
+        PersistenceFailed?.Invoke(this, EventArgs.Empty);
     }
 }

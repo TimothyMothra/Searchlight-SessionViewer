@@ -52,6 +52,10 @@ public static class ElevationHelper
                 UseShellExecute = true, // required for the runas verb / UAC
                 Verb = "runas",
             };
+            // ASSUMPTION: package elevation relaunches this same channel. Preserve
+            // demo/no-tray arguments rather than silently changing its launch mode.
+            foreach (string argument in Environment.GetCommandLineArgs().Skip(1))
+                psi.ArgumentList.Add(argument);
             return Process.Start(psi) is not null;
         }
         catch (Exception)

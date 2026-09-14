@@ -9,7 +9,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
-using System.IO;
+using System.Reflection;
 
 namespace Searchlight.Views;
 
@@ -31,12 +31,12 @@ public sealed partial class MainView : UserControl
     public FrameworkElement TitleBarElement => AppTitleBar;
 
     /// <summary>
-    /// The app icon shown in the custom title strip. Loaded by absolute path because
-    /// the app is unpackaged (<c>WindowsPackageType=None</c>), so <c>ms-appx:///</c> is
-    /// unreliable. Mirrors the tray-icon load pattern in <c>App.xaml.cs</c>.
+    /// The title-strip icon uses an application URI for MSIX and an absolute file
+    /// URI for unpackaged builds, matching the tray-icon loading behavior.
     /// </summary>
     public ImageSource AppIconSource { get; } =
-        new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "app_32.png")))
+        new BitmapImage(AppIdentity.AssetUri(
+            AppIdentity.IsPackaged && AppIdentity.Channel == "Dev" ? "PackageLogo44.png" : "app_32.png"))
         {
             DecodePixelWidth = 36,
         };
@@ -51,6 +51,16 @@ public sealed partial class MainView : UserControl
 
     public bool CanChangeElevation => !App.NoAdmin;
     public bool HasElevationOverride => App.NoAdmin;
+    public string AppDisplayName => AppIdentity.DisplayName;
+    public string AppChannelText => $"Channel: {AppIdentity.Channel}";
+
+    // ASSUMPTION: the build embeds the display name as informational version;
+    // reading it verbatim preserves zero padding and never uses the launch date.
+    public string AppVersionText { get; } =
+        $"Version {typeof(MainView).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? throw new InvalidOperationException("The app build is missing its informational version.")}";
+
+    private Button? _paneSourceButton;
 
     /// <summary>
     /// The host window's native HWND, injected by <see cref="MainWindow"/> after the content
@@ -74,6 +84,52 @@ public sealed partial class MainView : UserControl
             Source = ViewModel.SessionGroups,
         };
         SessionList.ItemsSource = groupedSource.View;
+    }
+
+    private void OnSettingsClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.Settings.Reload();
+        ShowApplicationPane(isSettings: true);
+    }
+
+    private void OnInformationClick(object sender, RoutedEventArgs e) => ShowApplicationPane(isSettings: false);
+
+    private void ShowApplicationPane(bool isSettings)
+    {
+        // ASSUMPTION: these are temporary views of the same window, not new sessions.
+        // Collapse rather than recreate the session controls to preserve their UI state.
+        RenameFlyout.Hide();
+        SessionSearchBar.Visibility = Visibility.Collapsed;
+        SessionContent.Visibility = Visibility.Collapsed;
+        SessionStatusBar.Visibility = Visibility.Collapsed;
+        SettingsPane.Visibility = isSettings ? Visibility.Visible : Visibility.Collapsed;
+        InformationPane.Visibility = isSettings ? Visibility.Collapsed : Visibility.Visible;
+        PaneTitle.Text = isSettings ? "Settings" : "Information";
+        _paneSourceButton = isSettings ? SettingsButton : InformationButton;
+        ApplicationPane.Visibility = Visibility.Visible;
+        BackButton.Focus(FocusState.Programmatic);
+    }
+
+    private void OnBackClick(object sender, RoutedEventArgs e) => ReturnToSessions();
+
+    private void OnPaneEscape(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (ApplicationPane.Visibility == Visibility.Visible)
+        {
+            ReturnToSessions();
+            args.Handled = true;
+        }
+    }
+
+    private void ReturnToSessions()
+    {
+        ApplicationPane.Visibility = Visibility.Collapsed;
+        SettingsPane.Visibility = Visibility.Collapsed;
+        InformationPane.Visibility = Visibility.Collapsed;
+        SessionSearchBar.Visibility = Visibility.Visible;
+        SessionContent.Visibility = Visibility.Visible;
+        SessionStatusBar.Visibility = Visibility.Visible;
+        _paneSourceButton?.Focus(FocusState.Programmatic);
     }
 
     private void OnSessionDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)

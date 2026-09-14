@@ -1,185 +1,172 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using Searchlight.Diagnostics;
 
 namespace Searchlight.Services;
 
-/// <summary>
-/// Reads and persists free-form per-session notes as plain-text sidecar files
-/// under <c>%LOCALAPPDATA%\Searchlight\notes\{sessionId}.md</c> — one file per
-/// session, keyed by the session UUID. This keeps notes out of
-/// <c>settings.json</c> (which would bloat on every keystroke-save) and leaves
-/// them readable/editable outside the app. Like <see cref="SettingsService"/>,
-/// all I/O is best-effort: read failures yield an empty string and write
-/// failures are swallowed (notes are non-critical). Searchlight never writes to
-/// the user's <c>~/.copilot</c> source — notes live only in the app's own dir.
-/// </summary>
+/// <summary>Plain-text shared notes with optimistic concurrency and recoverable conflicting drafts.</summary>
 public sealed class NotesService
 {
-    // Null dir => in-memory only (no disk I/O). Used by tests for isolation so
-    // they never read or clobber the real %LOCALAPPDATA% notes folder.
     private readonly string? _dir;
-
-    // Backing store for the in-memory (test) mode; unused when _dir is set.
+    private readonly SharedStatePaths? _paths;
     private readonly Dictionary<string, string> _memory = [];
+    private readonly Dictionary<string, string?> _observed = [];
+    private readonly object _sync = new();
+    private readonly string _writerId = Guid.NewGuid().ToString("N");
 
-    /// <summary>Creates a notes service backed by the default on-disk folder.</summary>
-    public NotesService()
-        : this(DefaultDir())
+    public string PersistenceNotice { get; private set; } = string.Empty;
+    public event EventHandler? PersistenceFailed;
+    /// <summary>Recovery file for the last failed write; null if no durable backup was possible.</summary>
+    public string? LastRecoveryPath { get; private set; }
+
+    public NotesService() : this(SharedStatePaths.Default) { }
+    internal NotesService(SharedStatePaths paths)
     {
+        _paths = paths;
+        _dir = paths.NotesDirectory;
     }
+    // Null retains isolated test/demo storage; no user-profile access.
+    internal NotesService(string? dir) => _dir = dir is null ? null : Path.GetFullPath(dir);
 
-    /// <summary>
-    /// Test/advanced constructor. A non-null <paramref name="dir"/> reads from and
-    /// writes to sidecar files under that folder; a null dir yields an isolated,
-    /// in-memory-only instance (never touches disk).
-    /// </summary>
-    internal NotesService(string? dir) => _dir = dir;
-
-    private static string DefaultDir() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Searchlight",
-        "notes");
-
-    /// <summary>
-    /// Returns the note text for a session, or an empty string when no note exists
-    /// (or on any read error). Never throws.
-    /// </summary>
+    /// <summary>Reads a snapshot and records the version against which the next write is checked.</summary>
     public string Read(string sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
+        if (string.IsNullOrWhiteSpace(sessionId)) return string.Empty;
+        lock (_sync)
         {
-            return string.Empty;
-        }
-
-        if (_dir is null)
-        {
-            return _memory.GetValueOrDefault(sessionId, string.Empty);
-        }
-
-        try
-        {
-            string path = PathFor(sessionId);
-            return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
-        }
-        catch (Exception)
-        {
-            return string.Empty;
+            if (_dir is null) return _memory.GetValueOrDefault(sessionId, string.Empty);
+            try
+            {
+                _paths?.MigrateLegacy();
+                using var gate = SharedStateIO.Lock(_dir);
+                string? text = SharedStateIO.ReadOptional(PathFor(sessionId));
+                _observed[sessionId] = text;
+                return text ?? string.Empty;
+            }
+            catch (Exception ex) when (SettingsService.IsStorageError(ex))
+            {
+                _observed.Remove(sessionId);
+                Report($"Could not read note {sessionId}; editing cannot overwrite an unread snapshot.", ex);
+                throw;
+            }
         }
     }
 
     /// <summary>
-    /// Persists the note text for a session (best-effort). Whitespace-only or empty
-    /// text removes the note file entirely rather than storing a blank note.
+    /// Saves only if the note still matches its observed snapshot. Read before
+    /// editing existing notes. Conflicts throw with a persistent recovery path.
     /// </summary>
     public void Write(string sessionId, string? text)
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            return;
-        }
-
+        if (string.IsNullOrWhiteSpace(sessionId)) return;
         text ??= string.Empty;
-        bool isEmpty = text.Trim().Length == 0;
-
-        if (_dir is null)
+        string? desired = string.IsNullOrWhiteSpace(text) ? null : text;
+        lock (_sync)
         {
-            if (isEmpty)
+            LastRecoveryPath = null;
+            if (_dir is null)
             {
-                _memory.Remove(sessionId);
-            }
-            else
-            {
-                _memory[sessionId] = text;
-            }
-
-            return;
-        }
-
-        try
-        {
-            string path = PathFor(sessionId);
-            if (isEmpty)
-            {
-                if (File.Exists(path))
-                {
-                    File.Delete(path);
-                }
-
+                if (desired is null) _memory.Remove(sessionId);
+                else _memory[sessionId] = desired;
                 return;
             }
-
-            Directory.CreateDirectory(_dir);
-            File.WriteAllText(path, text);
-        }
-        catch (Exception)
-        {
-            // Non-critical: the note just won't persist this session.
+            try
+            {
+                _paths?.MigrateLegacy();
+                using var gate = SharedStateIO.Lock(_dir);
+                string path = PathFor(sessionId);
+                string? disk = SharedStateIO.ReadOptional(path);
+                _observed.TryGetValue(sessionId, out string? baseline);
+                // ASSUMPTION: text equality defines a note version (including
+                // absence). Unobserved existing files must not be overwritten.
+                if (disk != baseline && disk != desired)
+                    throw new NotesConflictException(sessionId);
+                if (desired is null) File.Delete(path);
+                else SharedStateIO.WriteAtomic(path, desired);
+                _observed[sessionId] = desired;
+            }
+            catch (Exception ex) when (SettingsService.IsStorageError(ex))
+            {
+                string recovery;
+                try { recovery = PreserveDraft(sessionId, text); LastRecoveryPath = recovery; }
+                catch (Exception recoveryError) when (SettingsService.IsStorageError(recoveryError))
+                {
+                    Report($"Could not save note {sessionId} OR its recovery draft. Keep this window open and copy the draft before exiting.", recoveryError);
+                    throw new IOException(PersistenceNotice, new AggregateException(ex, recoveryError));
+                }
+                if (ex is NotesConflictException conflict)
+                {
+                    conflict.RecoveryPath = recovery;
+                    Report($"Note {sessionId} changed in another window. Shared text was not replaced. Your draft is retained at {recovery}. Compare and reconcile the files before editing again.", ex);
+                    throw;
+                }
+                Report($"Could not save note {sessionId}. Your draft is retained at {recovery}.", ex);
+                throw;
+            }
         }
     }
 
-    /// <summary>True when a non-empty note is stored for the session.</summary>
-    public bool HasNote(string sessionId)
+    private string PreserveDraft(string sessionId, string text)
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            return false;
-        }
-
-        if (_dir is null)
-        {
-            return _memory.ContainsKey(sessionId);
-        }
-
-        try
-        {
-            return File.Exists(PathFor(sessionId));
-        }
-        catch (Exception)
-        {
-            return false;
-        }
+        // Each window owns a separate draft, so retries never overwrite another
+        // window's recovery. Keep recovery files even after later successful saves.
+        string path = Path.Combine(_dir!, "conflicts", $"{SafeId(sessionId)}.{_writerId}.md");
+        SharedStateIO.WriteAtomic(path, text);
+        return path;
     }
 
-    /// <summary>Loads note-presence once per refresh, never once per search result.</summary>
+    public bool HasNote(string sessionId) =>
+        !string.IsNullOrWhiteSpace(sessionId) && LoadNoteIds().Contains(sessionId);
+
+    /// <summary>Presence indexing never changes the observed version of an edited note.</summary>
     public IReadOnlySet<string> LoadNoteIds()
     {
-        if (_dir is null)
-            return new HashSet<string>(_memory.Keys, StringComparer.Ordinal);
-
-        try
+        lock (_sync)
         {
-            return Directory.Exists(_dir)
-                ? Directory.EnumerateFiles(_dir, "*.md", SearchOption.TopDirectoryOnly)
-                    .Select(Path.GetFileNameWithoutExtension).OfType<string>()
-                    .ToHashSet(StringComparer.Ordinal)
-                : new HashSet<string>(StringComparer.Ordinal);
-        }
-        catch (IOException ex)
-        {
-            CoreLog.Write($"Note index unavailable: {ex.Message}");
-            throw;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            CoreLog.Write($"Note index unavailable: {ex.Message}");
-            throw;
+            if (_dir is null) return new HashSet<string>(_memory.Keys, StringComparer.Ordinal);
+            try
+            {
+                _paths?.MigrateLegacy();
+                using var gate = SharedStateIO.Lock(_dir);
+                string conflicts = Path.Combine(_dir, "conflicts");
+                if (SharedStateIO.DirectoryExists(conflicts)
+                    && Directory.EnumerateFiles(conflicts, "*.md").Any()
+                    && string.IsNullOrEmpty(PersistenceNotice))
+                {
+                    PersistenceNotice = $"Recovered note drafts exist at {conflicts}. Compare them with shared notes; remove recovery files only after reconciliation.";
+                    CoreLog.Write(PersistenceNotice);
+                    PersistenceFailed?.Invoke(this, EventArgs.Empty);
+                }
+                return Directory.EnumerateFiles(_dir, "*.md", SearchOption.TopDirectoryOnly)
+                    .Select(Path.GetFileNameWithoutExtension).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            }
+            catch (Exception ex) when (SettingsService.IsStorageError(ex))
+            {
+                Report("Could not reload shared notes.", ex);
+                throw;
+            }
         }
     }
 
-    private string PathFor(string sessionId) =>
-        Path.Combine(_dir!, Sanitize(sessionId) + ".md");
+    private string PathFor(string id) => Path.Combine(_dir!, SafeId(id) + ".md");
 
-    // Session ids are UUIDs and already file-safe, but guard defensively so a
-    // stray character can never escape the notes folder.
-    private static string Sanitize(string id)
+    private static string SafeId(string id)
     {
-        foreach (char c in Path.GetInvalidFileNameChars())
-        {
-            id = id.Replace(c, '_');
-        }
-
+        // Reject rather than normalize: distinct session IDs must never alias the
+        // same file. UUIDs and legacy optimistic-chat IDs satisfy this contract.
+        if (id is "." or ".." || id.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
+            throw new IOException("The session ID is not safe for note storage.");
         return id;
     }
+
+    private void Report(string message, Exception ex)
+    {
+        PersistenceNotice = $"{message} {ex.Message}";
+        CoreLog.Write($"{PersistenceNotice} {ex}");
+        PersistenceFailed?.Invoke(this, EventArgs.Empty);
+    }
+}
+
+public sealed class NotesConflictException(string sessionId)
+    : IOException($"Concurrent edits detected for note {sessionId}.")
+{
+    public string? RecoveryPath { get; internal set; }
 }

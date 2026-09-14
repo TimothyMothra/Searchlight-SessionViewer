@@ -46,7 +46,7 @@ public sealed class NotesTests
     public void NotesService_OnDisk_RoundTripsAcrossInstances_AndDeletes()
     {
         string dir = Path.Combine(
-            Path.GetTempPath(),
+            Directory.GetCurrentDirectory(),
             "SearchlightNotesTests_" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -56,7 +56,9 @@ public sealed class NotesTests
             Assert.Equal("disk note", new NotesService(dir).Read("abc"));
             Assert.True(new NotesService(dir).HasNote("abc"));
 
-            new NotesService(dir).Write("abc", string.Empty);
+            var deleting = new NotesService(dir);
+            deleting.Read("abc");
+            deleting.Write("abc", string.Empty);
             Assert.False(new NotesService(dir).HasNote("abc"));
         }
         finally

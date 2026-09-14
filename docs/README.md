@@ -15,6 +15,7 @@ on close, and only truly exits from the tray menu.
 |-----|----------------|
 | [architecture.md](./architecture.md) | Layered architecture, project graph, DI composition root, data flow, threading model, key design decisions |
 | [engineering.md](./engineering.md) | Projects, build configurations & compile flags, run modes, build/run/test commands, dependencies, settings, resume behavior, platform notes |
+| [msix.md](./msix.md) | Dev/Production MSIX builds, signing, sideload installation, shared data, and side-by-side review |
 | [data-model.md](./data-model.md) | The `~/.copilot` on-disk sources each reader consumes, and the in-memory domain model |
 
 ## 30-second orientation

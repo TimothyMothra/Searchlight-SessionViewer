@@ -1,6 +1,12 @@
 # Build output
 bin/
 obj/
+artifacts/
+AppPackages/
+
+# Never commit private package-signing keys.
+*.pfx
+*.p12
 
 # Visual Studio / Rider
 .vs/

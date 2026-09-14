@@ -221,6 +221,13 @@ on refresh (detail content is also checked when reselected).
 | Foreground/resize/Win32 | `Interop\ForegroundWindowHelper` | Bring-to-front past the OS foreground lock; DPI-aware logical resize. |
 | UI-thread marshalling | `Services\DispatcherQueueUiDispatcher` | Adapter over `DispatcherQueue.TryEnqueue`. |
 | Theme | `Services\SystemThemeHelper` | System light/dark. |
+| Channel identity | `Services\AppIdentity` | Build metadata selects Dev, Production, or Unpackaged branding, mutex/event namespace, and diagnostics. |
+
+**MSIX and shared state:** the host supports single-project MSIX packaging without adding
+WinUI references to Core. Production and Dev use separate package families, while both use
+the shared `%USERPROFILE%\.searchlight` data root outside virtualized AppData. Persistence
+coordination and migration belong in Core; manifest selection, certificate signing, package
+installation, and activation remain host/tooling concerns. See [msix.md](msix.md).
 
 ---
 

@@ -32,7 +32,7 @@ public sealed partial class MainWindow : Window
     {
         ViewModel = viewModel;
         InitializeComponent();
-        Title = "Searchlight: Historical Session Viewer";
+        Title = $"{AppIdentity.DisplayName}: Historical Session Viewer";
 
         // Mica backdrop for the modern Fluent look.
         SystemBackdrop = new MicaBackdrop();

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap desktop rescap">
+  <!-- ASSUMPTION: Build-Msix generates a channel-specific copy, never edits this template. -->
+  <Identity Name="TimothyMothra.Searchlight.Dev" Publisher="CN=Searchlight Development"
+            Version="1.0.0.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Searchlight Dev</DisplayName>
+    <PublisherDisplayName>Searchlight</PublisherDisplayName>
+    <Logo>Assets\PackageLogo50.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Applications>
+    <Application Id="App" Executable="Searchlight.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Searchlight Dev" Description="Historical Session Viewer for GitHub Copilot"
+                          BackgroundColor="transparent"
+                          Square44x44Logo="Assets\PackageLogo44.png"
+                          Square150x150Logo="Assets\PackageLogo150.png" />
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="Searchlight.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="SearchlightStartup" Enabled="false" DisplayName="Searchlight Dev" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="allowElevation" />
+  </Capabilities>
+</Package>

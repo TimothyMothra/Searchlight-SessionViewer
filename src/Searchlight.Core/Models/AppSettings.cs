@@ -10,6 +10,8 @@ namespace Searchlight.Models;
 /// </summary>
 public sealed partial class AppSettings : ObservableObject
 {
+    public const string DefaultResumeCommandTemplate = "copilot --resume={sessionId}";
+
     /// <summary>
     /// When true (default), every Resume opens as a new tab in the user's
     /// most-recently-used Windows Terminal window (<c>-w last</c>). When false,
@@ -38,6 +40,14 @@ public sealed partial class AppSettings : ObservableObject
     /// </summary>
     [ObservableProperty]
     private bool _appendYolo;
+
+    // ASSUMPTION: custom mode owns all arguments, including --yolo; switching back
+    // to the default command retains the user's existing AppendYolo preference.
+    [ObservableProperty]
+    private bool _useCustomResumeCommand;
+
+    [ObservableProperty]
+    private string _customResumeCommand = DefaultResumeCommandTemplate;
 
     /// <summary>
     /// Session UUIDs the user has pinned to the top of the list, newest-pinned

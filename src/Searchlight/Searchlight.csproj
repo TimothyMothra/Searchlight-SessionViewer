@@ -24,12 +24,54 @@
 
     <!-- Unpackaged WinUI 3: run as a plain .exe, self-contained so no separate
          Windows App SDK runtime install is required. -->
-    <WindowsPackageType>None</WindowsPackageType>
+    <SearchlightPackaging Condition="'$(SearchlightPackaging)' == ''">None</SearchlightPackaging>
+    <SearchlightChannel Condition="'$(SearchlightChannel)' == ''">Unpackaged</SearchlightChannel>
+    <WindowsPackageType Condition="'$(SearchlightPackaging)' != 'Msix'">None</WindowsPackageType>
+    <WindowsPackageType Condition="'$(SearchlightPackaging)' == 'Msix'">MSIX</WindowsPackageType>
+    <AppxPackage Condition="'$(SearchlightPackaging)' == 'Msix'">true</AppxPackage>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <EnableMsixTooling>true</EnableMsixTooling>
     <SelfContained>true</SelfContained>
     <AssemblyName>Searchlight</AssemblyName>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
+
+  <!-- ASSUMPTION: allocate once per real host build, not IDE design-time builds
+       or restore. Keep state outside configuration-specific intermediates. -->
+  <Target Name="AllocateSearchlightBuildVersion" BeforeTargets="GetAssemblyVersion"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="pwsh -NoProfile -NonInteractive -File &quot;$(MSBuildProjectDirectory)\..\..\tools\Get-NextBuildVersion.ps1&quot; -StateDirectory &quot;$(MSBuildProjectDirectory)\obj\build-version&quot;"
+          ConsoleToMSBuild="true" StandardOutputImportance="Low"
+          Condition="'$(SearchlightBuildVersion)' == ''">
+      <Output TaskParameter="ConsoleOutput" PropertyName="SearchlightBuildVersion" />
+    </Exec>
+    <PropertyGroup>
+      <AssemblyVersion>$(SearchlightBuildVersion)</AssemblyVersion>
+      <FileVersion>$(SearchlightBuildVersion)</FileVersion>
+      <InformationalVersion>$(SearchlightBuildVersion)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+
+  <!-- ASSUMPTION: packaging scripts supply a generated manifest and assets.
+       Reject partial configuration rather than shipping the wrong channel. -->
+  <Target Name="ValidateSearchlightPackaging" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(SearchlightChannel)' != 'Unpackaged' and '$(SearchlightChannel)' != 'Dev' and '$(SearchlightChannel)' != 'Production'"
+           Text="SearchlightChannel must be Unpackaged, Dev, or Production." />
+    <Error Condition="'$(SearchlightPackaging)' == 'Msix' and ('$(SearchlightChannel)' == 'Unpackaged' or !Exists('$(SearchlightPackageManifest)'))"
+           Text="Build MSIX using tools\Build-Msix.ps1 with a channel and generated package manifest." />
+  </Target>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="SearchlightChannel" Value="$(SearchlightChannel)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SearchlightPackaging)' == 'Msix'">
+    <AppxManifest Include="$(SearchlightPackageManifest)" />
+    <Content Include="$(SearchlightPackageAssets)\*.png">
+      <Link>Assets\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 
   <!-- 'Demo' build configuration: compiles the app to boot against the synthetic
        MockSessionDataSource (no real ~/.copilot access) so the UI can be exercised

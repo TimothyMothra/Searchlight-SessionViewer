@@ -14,10 +14,12 @@ set (with pin rationale), and the settings/resume/elevation behavior.
 | OS to build/run the **exe** | Windows 10 1809+ (`10.0.17763.0` min) | WinUI 3 / Windows App SDK. |
 | OS to build/run **Core + Tests** | any (`net10.0`) | No WinUI; `dotnet test` runs cross-platform. |
 | Architecture | `x64` or `arm64` | Exe declares `Platforms=x64;arm64`, `RuntimeIdentifiers=win-x64;win-arm64`. |
+| PowerShell | **7+** (`pwsh` on PATH) | Allocates the daily app build number; also used by the installer. |
 
-The app is **unpackaged and self-contained** (`WindowsPackageType=None`,
-`WindowsAppSDKSelfContained=true`, `SelfContained=true`) — it runs as a plain `.exe` with no
-separate Windows App SDK runtime install.
+Direct builds remain **unpackaged and self-contained** (`WindowsPackageType=None`,
+`WindowsAppSDKSelfContained=true`, `SelfContained=true`). The MSIX build entry point enables
+single-project packaging while retaining that runtime closure. See [MSIX distribution](msix.md)
+for the Dev/Production package identities, signing, and side-by-side installation workflow.
 
 ---
 
@@ -68,6 +70,29 @@ private static bool ResolveUseMock()
 
 So **compile-time** (`Demo` config) and **runtime** (`--demo` flag) both reach the mock; the compile
 flag wins hard, the runtime flag is the opt-in for a normal build.
+
+### App build names
+
+Every real host build embeds a name in **`YYYY.MM.DD.##`** format, for example
+`2026.09.14.01`. The date is the build machine's local Gregorian date, not the launch date.
+`tools\Get-NextBuildVersion.ps1` increments the daily suffix before assembly metadata generation;
+Debug, Release, Demo, and publish builds share this worktree's ignored
+`src\Searchlight\obj\build-version` counters. Restore and IDE design-time builds do not allocate.
+The informational version preserves zero padding; assembly/file versions carry the same numeric
+components. Information displays the embedded name without a Git SHA suffix.
+
+Numbers start at **01** on each new day. Allocation is locked across concurrent processes and
+counter replacement is atomic. Failed builds can consume a number. To preserve the exact two-digit
+format, build 100 fails explicitly rather than wrapping or reusing a number. Counters are local,
+not a globally coordinated release sequence: a new worktree or deleting its counter directory
+starts again at 01. Keep that directory to retain same-day numbering.
+
+MSIX builds instead accept an allocated build name. Automatic Dev allocation is shared across
+worktrees under `%LOCALAPPDATA%\Searchlight.Build\Dev`; Production requires an explicit release
+name. Package versions and additional-architecture builds follow the [MSIX version contract](msix.md#versions).
+
+Run `pwsh -NoProfile -File tools\Test-BuildVersion.ps1` for isolated checks of incrementing,
+date rollover, culture-independent formatting, exhaustion, corrupt state, and concurrent allocation.
 
 > **MSBuild/XAML gotcha:** XML/XAML comments cannot contain a double-hyphen (`--`). Both MSBuild
 > (`MSB4025`) and the XAML compiler (`WMC9997`) reject it. When documenting the `--demo`/`--no-tray`
@@ -131,16 +156,18 @@ pwsh -File C:\REPOS\Searchlight\tools\install.ps1
 pwsh -File C:\REPOS\Searchlight\tools\install.ps1 -Action Uninstall
 ```
 
-**Deploying is what makes a change visible.** `dotnet build`/`run` only touch `bin\`; the
-Start Menu, desktop, and login shortcuts all point at `%LOCALAPPDATA%\Searchlight\app`, so a
-change is not testable through the normal launch path until `install.ps1` republishes there.
+**Deploying is what makes a change visible.** Local review uses the Dev MSIX workflow
+in [msix.md](msix.md). `dotnet build`/`run` only touch `bin\`. For an explicitly unpackaged
+installation, the Start Menu, desktop, and login shortcuts point at
+`%LOCALAPPDATA%\Searchlight\app`, so `install.ps1` must republish there.
 The script refuses to run while Searchlight is running, and swaps the install folder aside
 rather than deleting it in place — a `Remove-Item -Recurse` over a locked file deletes
 everything it *can* before erroring, which silently leaves a half-deleted, unlaunchable
-install behind. Settings survive a reinstall: `settings.json` lives in the **parent**
-`%LOCALAPPDATA%\Searchlight\`, not the replaced `app\` folder.
+install behind. Shared settings and notes live under `%USERPROFILE%\.searchlight`,
+outside both the unpackaged install folder and MSIX-managed package storage.
 
-**Diagnostics:** the app writes breadcrumbs to `%TEMP%\Searchlight.log`. Core routes its
+**Diagnostics:** the app writes breadcrumbs to `%TEMP%\Searchlight.<channel>.log`
+(`Dev`, `Production`, or `Unpackaged`). Core routes its
 own breadcrumbs there through the `CoreLog.Sink` seam. A healthy live launch logs e.g.
 `published NNN rows in MM groups (total NNN)`; a mock launch logs `data source returned 15 sessions`.
 
@@ -188,14 +215,17 @@ Microsoft.NET.Test.Sdk 17.11.1 · xunit 2.9.2 · xunit.runner.visualstudio 2.8.2
 
 ### Settings (`AppSettings`)
 
-Persisted as JSON at `%LOCALAPPDATA%\Searchlight\settings.json`, auto-saved on any property
-change (`SettingsService`). Five toggles, exposed via the titlebar gear flyout:
+Persisted as JSON at `%USERPROFILE%\.searchlight\settings.json`, shared by the channels
+and auto-saved on any property
+change (`SettingsService`). Options are exposed via the titlebar gear's full-window Settings pane:
 
 | Setting | Default | Effect |
 |---------|:-------:|--------|
 | `UseSharedTerminalWindow` | **on** (opt-out) | Resume opens a **new tab** in your most-recently-used Windows Terminal window (`-w last`); off → each resume opens its **own** new window (`-w new`). |
 | `RunElevated` | **off** | Relaunch the app elevated/non-elevated. A process can't change integrity level in place, so toggling **restarts** the app (elevate via `runas`; de-elevate by relaunching through `explorer.exe`). Needed because a non-elevated `wt -w` can't attach a tab to an **Admin** Terminal (UIPI). |
-| `AppendYolo` | **off** (opt-in) | Append `--yolo` to the resume command (auto-approves tool actions in the resumed session). Does **not** restart the app. |
+| `AppendYolo` | **off** (opt-in) | Append `--yolo` to the default resume command (auto-approves tool actions). Custom templates control their own flags. Does **not** restart the app. |
+| `UseCustomResumeCommand` | **off** | Replace the command inside the terminal with the custom template; terminal/window handling remains unchanged. |
+| `CustomResumeCommand` | `copilot --resume={sessionId}` | Single-line cmd.exe command with a required `{sessionId}` token. Saved even while custom mode is off. |
 | `HideEmptySessions` | **on** (opt-out) | Hide sessions with no `events.jsonl` — folders Copilot provisions on project open that never held a conversation. Information-lossless: they contain no messages, and no *named* session lacks events. |
 | `HideUnnamedSessions` | **off** (opt-in) | Hide every session still showing a bare UUID. Stronger than the above — also hides older sessions that hold real conversations but predate auto-naming. |
 
@@ -211,9 +241,53 @@ both drops 601 → **307 visible**.
 When elevated, the titlebar shows a **white UAC shield** at the far left (matching Windows Terminal's
 admin affordance).
 
+### Settings and Information navigation
+
+The titlebar keeps the **Settings** gear followed immediately by a circled-i **Information**
+button, separate from its draggable label region. Each opens a full-size pane below the titlebar,
+replacing the search bar, session list/details/notes, and session status footer rather than opening
+a popup. Both panes scroll vertically as needed; text wraps without horizontal scrolling.
+Settings retain their existing immediate auto-save and live-filter behavior.
+
+**Back** or **Escape** returns to the existing session view without recreating its controls,
+preserving search, selection, notes, and scroll position (subject to live data and filter updates).
+The titlebar buttons can switch directly between panes; keyboard focus moves to Back on entry
+and returns to the corresponding titlebar button on exit.
+
+Information shows the embedded date-based build name, a link to the
+[GitHub repository](https://github.com/TimothyMothra/Searchlight-SessionViewer), app purpose,
+basic session/task/resume guidance, local-data storage behavior, and tray versus no-tray behavior.
+
 ### Resume (`ResumeLauncher`)
 
-Builds and launches:
+The **Resume command** Settings group contains the existing `--yolo` toggle, custom-mode
+switch, one template text box, a selectable monospace preview panel, validation warning,
+and **Restore default command** action. The preview uses the empty GUID
+`00000000-0000-0000-0000-000000000000` for the session ID:
+
+```text
+copilot --resume=00000000-0000-0000-0000-000000000000 --yolo
+```
+
+Custom mode replaces the complete command **inside** the terminal, not the terminal launcher.
+Use the exact, case-sensitive `{sessionId}` token, for example:
+
+```text
+"C:\My Tools\resume.cmd" --session "{sessionId}"
+```
+
+The template owns all flags; the `--yolo` toggle is disabled in custom mode and is not
+automatically appended. Switching back preserves its previous value. Restoring the default
+turns off custom mode and resets the template without changing the saved `--yolo` preference.
+Editing only saves settings and updates the preview; it never executes the command.
+
+Templates must contain the token, have no control characters/newlines, and be at most 3000
+characters including full-UUID expansion (leaving room for encoded Windows command-line transport). Invalid templates
+show a warning and cannot be launched. At execution the selected ID must be a UUID; every
+token occurrence is replaced with that ID. Arbitrary remaining shell syntax is intentional
+user-authored code and runs with the app's current permissions, including elevation.
+
+Default mode retains the existing launch behavior:
 
 ```
 wt.exe -w <last|new> new-tab --title "<name>" cmd /k copilot --resume=<session-id> [--yolo]
@@ -222,6 +296,12 @@ wt.exe -w <last|new> new-tab --title "<name>" cmd /k copilot --resume=<session-i
 - The CLI has **no bare `resume` subcommand** — the correct syntax is `copilot --resume=<id>`
   (alias `-r`). An earlier `copilot resume <id>` form produced *"Invalid command format"*.
 - If Windows Terminal (`wt.exe`) isn't available, falls back to `cmd.exe /k`.
+- Custom commands use an encoded Windows PowerShell transport inside Windows Terminal so
+  its semicolon parser and quoting reconstruction cannot rewrite the template. The transport
+  starts `cmd.exe /s /k` with the original expanded text; no temporary scripts are written.
+  Direct Command Prompt fallback uses the same expanded command without that transport.
+- Live and mock resume paths use the same Core command builder as the preview. Launch errors
+  and invalid templates are surfaced in the session's action/status message.
 - Cross-integrity-level window reuse is blocked by the OS: to reuse an **elevated** main Terminal,
   the app must also be elevated (the `RunElevated` toggle).
 

@@ -45,6 +45,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _suppressNotesSave;
     private bool _notesDirty;
     private CancellationTokenSource? _notesDebounceCts;
+    private readonly Dictionary<string, string> _noteDrafts = [];
 
     // ASSUMPTION: 30 recent rows cover a screenful plus buffer. All pins and the
     // selection are additional priorities, even when older than this window.
@@ -86,24 +87,78 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         // Re-filter whenever a list-hiding setting is toggled so the list responds
-        // to the Settings flyout immediately (no reload required).
+        // to the Settings pane immediately (no reload required).
         settings.Current.PropertyChanged += OnSettingsPropertyChanged;
+        settings.PersistenceFailed += OnPersistenceFailed;
+        notes.PersistenceFailed += OnPersistenceFailed;
+        UpdatePersistenceNotice();
     }
 
     private void OnSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(AppSettings.AppendYolo)
+            or nameof(AppSettings.UseCustomResumeCommand)
+            or nameof(AppSettings.CustomResumeCommand))
+        {
+            OnPropertyChanged(nameof(ResumeCommandPreview));
+            OnPropertyChanged(nameof(ResumeCommandValidationMessage));
+            OnPropertyChanged(nameof(HasResumeCommandError));
+            OnPropertyChanged(nameof(IsDefaultResumeCommand));
+        }
+        if (e.PropertyName == nameof(AppSettings.NotesPaneVisible))
+            IsNotesPaneVisible = Settings.Current.NotesPaneVisible;
+        if (e.PropertyName == nameof(AppSettings.PinnedSessionIds))
+        {
+            _pinnedIds.Clear();
+            _pinnedIds.UnionWith(Settings.Current.PinnedSessionIds);
+        }
+        if (e.PropertyName == nameof(AppSettings.CustomSessionNames))
+        {
+            _customNames.Clear();
+            foreach (var pair in Settings.Current.CustomSessionNames) _customNames[pair.Key] = pair.Value;
+        }
         if (e.PropertyName is nameof(AppSettings.HideEmptySessions)
-            or nameof(AppSettings.HideUnnamedSessions))
+            or nameof(AppSettings.HideUnnamedSessions)
+            or nameof(AppSettings.PinnedSessionIds)
+            or nameof(AppSettings.CustomSessionNames))
         {
             ApplyFilter(refreshRows: true);
         }
     }
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPersistenceNotice))]
+    private string _persistenceNotice = string.Empty;
+
+    /// <summary>Sticky warning, independent of transient action/load status.</summary>
+    public bool HasPersistenceNotice => !string.IsNullOrEmpty(PersistenceNotice);
+
+    private void OnPersistenceFailed(object? sender, EventArgs e) =>
+        _dispatcher.Post(UpdatePersistenceNotice);
+
+    private void UpdatePersistenceNotice()
+    {
+        PersistenceNotice = string.Join(Environment.NewLine,
+            new[] { Settings.PersistenceNotice, _notes.PersistenceNotice }.Where(s => !string.IsNullOrEmpty(s)));
+    }
+
     /// <summary>The details pane view-model (empty until a row is selected).</summary>
     public DetailsViewModel Details { get; }
 
-    /// <summary>App settings, bound by the Settings flyout and used by resume.</summary>
+    /// <summary>App settings, bound by the Settings pane and used by resume.</summary>
     public SettingsService Settings { get; }
+
+    public string ResumeCommandPreview => ResumeCommandBuilder.Preview(Settings.Current);
+    public string ResumeCommandValidationMessage => ResumeCommandBuilder.Validate(Settings.Current) ?? string.Empty;
+    public bool HasResumeCommandError => ResumeCommandValidationMessage.Length > 0;
+    public bool IsDefaultResumeCommand => !Settings.Current.UseCustomResumeCommand;
+
+    [RelayCommand]
+    private void ResetResumeCommand()
+    {
+        Settings.Current.UseCustomResumeCommand = false;
+        Settings.Current.CustomResumeCommand = ResumeCommandBuilder.DefaultTemplate;
+    }
 
     /// <summary>Filtered sessions grouped into recency buckets, bound to the list.</summary>
     public ObservableCollection<SessionGroup> SessionGroups { get; } = [];
@@ -232,6 +287,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _notesDirty = true;
+        _noteDrafts[_notesSessionId] = value;
         ScheduleNotesSave(_notesSessionId, value);
 
         // Drive the presence indicators from the live text. The details-pane badge
@@ -294,6 +350,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             do
             {
                 _reloadRequested = false;
+                Settings.Reload();
+                ReloadSelectedNote();
                 CoreLog.Write("LoadAsync: start");
                 Stopwatch loadStopwatch = Stopwatch.StartNew();
                 CancellationToken token = _lifetime.Token;
@@ -629,7 +687,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // next refresh; the selected editor's pending text always wins.
         foreach (SessionInfo session in ordered)
         {
-            session.HasNote = string.Equals(session.Id, _notesSessionId, StringComparison.Ordinal)
+            session.HasNote = _noteDrafts.TryGetValue(session.Id, out string? draft)
+                ? !string.IsNullOrWhiteSpace(draft)
+                : string.Equals(session.Id, _notesSessionId, StringComparison.Ordinal)
                 ? !string.IsNullOrWhiteSpace(SelectedNotes)
                 : _notedIds.Contains(session.Id);
         }
@@ -740,10 +800,36 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         FlushPendingNotes();
 
         _notesSessionId = newId;
+        SetNotesText(newId is not null && _noteDrafts.TryGetValue(newId, out string? draft) ? draft : ReadNote(newId));
+        _notesDirty = newId is not null && _noteDrafts.ContainsKey(newId);
+        SelectedHasNote = !string.IsNullOrWhiteSpace(SelectedNotes);
+    }
+
+    private string ReadNote(string? id)
+    {
+        if (id is null) return string.Empty;
+        try { return _notes.Read(id); }
+        catch (Exception ex) when (SettingsService.IsStorageError(ex))
+        {
+            UpdatePersistenceNotice();
+            return string.Empty;
+        }
+    }
+
+    private void SetNotesText(string text)
+    {
         _suppressNotesSave = true;
-        SelectedNotes = newId is null ? string.Empty : _notes.Read(newId);
-        _suppressNotesSave = false;
-        _notesDirty = false;
+        try { SelectedNotes = text; }
+        finally { _suppressNotesSave = false; }
+    }
+
+    private void ReloadSelectedNote()
+    {
+        // ASSUMPTION: a refresh is not conflict resolution. Never advance the
+        // baseline of an editor that still owns a draft, even after backup.
+        if (_notesSessionId is null || _noteDrafts.ContainsKey(_notesSessionId)) return;
+        try { SetNotesText(_notes.Read(_notesSessionId)); }
+        catch (Exception ex) when (SettingsService.IsStorageError(ex)) { UpdatePersistenceNotice(); }
         SelectedHasNote = !string.IsNullOrWhiteSpace(SelectedNotes);
     }
 
@@ -752,6 +838,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void ScheduleNotesSave(string sessionId, string text)
     {
         _notesDebounceCts?.Cancel();
+        _notesDebounceCts?.Dispose();
         CancellationTokenSource cts = new();
         _notesDebounceCts = cts;
 
@@ -774,8 +861,33 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _notes.Write(sessionId, text);
-        _notesDirty = false;
+        // Serialize editor mutation and persistence with selection/shutdown on
+        // the UI dispatcher. A superseded delayed callback cannot clear a draft.
+        _dispatcher.Post(() =>
+        {
+            if (ct.IsCancellationRequested || _lifetime.IsCancellationRequested) return;
+            if (_noteDrafts.TryGetValue(sessionId, out string? draft) && draft == text)
+                SaveNoteDraft(sessionId, text);
+        });
+    }
+
+    private bool SaveNoteDraft(string sessionId, string text)
+    {
+        try
+        {
+            _notes.Write(sessionId, text);
+            _noteDrafts.Remove(sessionId);
+            if (_notesSessionId == sessionId) _notesDirty = false;
+            return true;
+        }
+        catch (Exception ex) when (SettingsService.IsStorageError(ex))
+        {
+            // Keep the editor draft as well as the persistent recovery copy;
+            // switching away and back must not substitute the other writer's text.
+            _noteDrafts[sessionId] = text;
+            UpdatePersistenceNotice();
+            return _notes.LastRecoveryPath is not null;
+        }
     }
 
     // Immediately persists the current note if it has unsaved edits, cancelling any
@@ -783,13 +895,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void FlushPendingNotes()
     {
         _notesDebounceCts?.Cancel();
+        _notesDebounceCts?.Dispose();
         _notesDebounceCts = null;
 
         if (_notesSessionId is not null && _notesDirty)
         {
-            _notes.Write(_notesSessionId, SelectedNotes);
-            _notesDirty = false;
+            SaveNoteDraft(_notesSessionId, SelectedNotes);
         }
+    }
+
+    /// <summary>
+    /// Persists all drafts or recovery copies. Hosts should veto exit on false:
+    /// storage is unavailable and an in-memory draft is not safely recoverable.
+    /// </summary>
+    public bool TryFlushNotes()
+    {
+        _notesDebounceCts?.Cancel();
+        _notesDebounceCts?.Dispose();
+        _notesDebounceCts = null;
+        bool durable = true;
+        foreach (var (id, text) in _noteDrafts.ToArray())
+            durable &= SaveNoteDraft(id, text);
+        return durable;
     }
 
     /// <summary>
@@ -933,15 +1060,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private static bool Contains(string? value, string query) =>
         value is not null && value.Contains(query, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Detaches the watcher and settings events.</summary>
+    /// <summary>
+    /// Detaches the watcher and settings events after securing drafts. Throws if
+    /// storage cannot preserve them; hosts should call TryFlushNotes before exit.
+    /// </summary>
     public void Dispose()
     {
+        if (!TryFlushNotes()) throw new IOException(PersistenceNotice);
         _lifetime.Cancel();
         Details.Load(null);
-        // Persist any unsaved note before teardown.
-        FlushPendingNotes();
 
         Settings.Current.PropertyChanged -= OnSettingsPropertyChanged;
+        Settings.PersistenceFailed -= OnPersistenceFailed;
+        _notes.PersistenceFailed -= OnPersistenceFailed;
 
         if (_watcherHooked)
         {
