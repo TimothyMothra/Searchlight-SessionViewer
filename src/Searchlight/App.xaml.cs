@@ -49,6 +49,7 @@ public partial class App : Application
 
     /// <summary>Per-launch elevation override; never changes the saved preference.</summary>
     internal static bool NoAdmin => HasFlag("--no-admin");
+    internal static bool NoTray => HasFlag("--no-tray");
 
     // Single-instance guard (normal tray mode only). The first instance owns this
     // mutex and listens on a named event; a later normal launch (e.g. the user
@@ -176,7 +177,7 @@ public partial class App : Application
         //   --no-tray : run as a plain window, no tray icon; close = exit.
         //   --demo    : boot against the synthetic MockSessionDataSource (also the
         //               default when compiled in the Demo config via USE_MOCK).
-        _noTray = HasFlag("--no-tray");
+        _noTray = NoTray;
         bool useMock = ResolveUseMock();
         Log($"OnLaunched: noTray={_noTray} useMock={useMock} noAdmin={NoAdmin} elevated={ElevationHelper.IsElevated()}");
 

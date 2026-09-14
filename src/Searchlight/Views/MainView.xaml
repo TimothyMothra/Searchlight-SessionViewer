@@ -82,7 +82,8 @@
                  Message="{x:Bind ViewModel.PersistenceNotice, Mode=OneWay}" />
 
         <Grid x:Name="ApplicationPane" Grid.Row="2" Grid.RowSpan="3"
-              Visibility="Collapsed">
+              Visibility="Collapsed" KeyboardAcceleratorPlacementMode="Hidden">
+            <!-- ASSUMPTION: Escape stays active, but the container must not generate a key-tip tooltip. -->
             <Grid.KeyboardAccelerators>
                 <KeyboardAccelerator Key="Escape" Invoked="OnPaneEscape" />
             </Grid.KeyboardAccelerators>
@@ -218,17 +219,12 @@
                 <StackPanel Spacing="12" Margin="24,0,24,32">
                     <TextBlock Text="{x:Bind AppDisplayName}" Style="{StaticResource TitleTextBlockStyle}"
                                TextWrapping="Wrap" />
-                    <TextBlock Text="{x:Bind AppVersionText}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Text="{x:Bind AppChannelText}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <!-- ASSUMPTION: the raw URL remains clickable. -->
-                    <HyperlinkButton NavigateUri="https://github.com/TimothyMothra/Searchlight-SessionViewer"
-                                     HorizontalAlignment="Left" Padding="0"
-                                     AutomationProperties.Name="Open the Searchlight GitHub repository">
-                        <TextBlock Text="https://github.com/TimothyMothra/Searchlight-SessionViewer"
-                                   TextWrapping="Wrap" />
-                    </HyperlinkButton>
+                    <TextBlock TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                        <Run Text="{x:Bind AppVersionText}" />
+                        <Run Text=" - " />
+                        <Run Text="{x:Bind AppChannelText}" />
+                    </TextBlock>
                     <TextBlock Text="Historical Session Viewer for GitHub Copilot"
                                Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
                     <TextBlock Text="Browse, search, and resume your local GitHub Copilot sessions from one place."
@@ -247,13 +243,31 @@
                     <TextBlock Text="Your data" Margin="0,16,0,0"
                                Style="{StaticResource SubtitleTextBlockStyle}"
                                AutomationProperties.HeadingLevel="Level2" />
-                    <TextBlock Text="Searchlight reads your local Copilot history from ~/.copilot without modifying it. Production and Dev share settings, pins, display names, and notes under %USERPROFILE%\.searchlight."
-                               TextWrapping="Wrap" />
+                    <ScrollViewer x:Name="YourDataText"
+                                  HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Searchlight reads your local Copilot history from ~/.copilot without modifying it."
+                                       TextWrapping="NoWrap" IsTextSelectionEnabled="True" />
+                            <TextBlock Text="{x:Bind AppDataStorageText}"
+                                       TextWrapping="NoWrap" IsTextSelectionEnabled="True" />
+                        </StackPanel>
+                    </ScrollViewer>
                     <TextBlock Text="Window and tray" Margin="0,16,0,0"
                                Style="{StaticResource SubtitleTextBlockStyle}"
                                AutomationProperties.HeadingLevel="Level2" />
-                    <TextBlock Text="In tray mode, closing or minimizing the window hides it. Use the tray menu to open Searchlight again or exit. In no-tray mode, closing the window exits the app."
+                    <TextBlock Text="{x:Bind AppWindowBehaviorText}"
                                TextWrapping="Wrap" />
+                    <TextBlock Text="Source Control" Margin="0,16,0,0"
+                               Style="{StaticResource SubtitleTextBlockStyle}"
+                               AutomationProperties.HeadingLevel="Level2" />
+                    <!-- ASSUMPTION: the raw URL remains clickable. -->
+                    <HyperlinkButton NavigateUri="https://github.com/TimothyMothra/Searchlight-SessionViewer"
+                                     HorizontalAlignment="Left" Padding="0"
+                                     AutomationProperties.Name="Open the Searchlight GitHub repository">
+                        <TextBlock Text="https://github.com/TimothyMothra/Searchlight-SessionViewer"
+                                   TextWrapping="Wrap" />
+                    </HyperlinkButton>
                 </StackPanel>
             </ScrollViewer>
         </Grid>

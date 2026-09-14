@@ -54,6 +54,16 @@ public sealed partial class MainView : UserControl
     public string AppDisplayName => AppIdentity.DisplayName;
     public string AppChannelText => $"Channel: {AppIdentity.Channel}";
 
+    // ASSUMPTION: only Dev builds expose channel-sharing details to the user.
+    public string AppDataStorageText => AppIdentity.Channel == "Dev"
+        ? @"Production and Dev share settings, pins, display names, and notes under %USERPROFILE%\.searchlight."
+        : @"Settings, pins, display names, and notes are stored under %USERPROFILE%\.searchlight.";
+
+    // ASSUMPTION: user-facing instructions describe this launch, not every available CLI mode.
+    public string AppWindowBehaviorText => App.NoTray
+        ? "This launch is running without a system-tray icon.\nClosing the window exits Searchlight."
+        : "Closing or minimizing the window hides Searchlight in the system tray.\nUse the tray menu to reopen Searchlight or exit the app.";
+
     // ASSUMPTION: the build embeds the display name as informational version;
     // reading it verbatim preserves zero padding and never uses the launch date.
     public string AppVersionText { get; } =

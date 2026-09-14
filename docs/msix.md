@@ -108,7 +108,31 @@ Use a trusted production signing arrangement; do not distribute the Dev
 self-signed certificate as a production trust solution. Timestamping is recommended.
 An unsigned Production artifact can be generated explicitly if the destination signs
 packages itself. Destination submission and publishing policy are not implemented.
-Each invocation produces one architecture-specific MSIX, not a bundle or hosted feed.
+Each build invocation produces one architecture-specific MSIX. Use the bundling step
+below for a single multi-architecture distribution file; hosted update feeds remain separate.
+
+### One MSIXBUNDLE for x64 and ARM64
+
+Build both packages with identical package name, publisher, and release version, then:
+
+```powershell
+.\tools\Bundle-Msix.ps1 -X64Package $x64.Path -Arm64Package $arm64.Path `
+    -OutputPath .\artifacts\Searchlight.msixbundle -Unsigned
+```
+
+Windows selects the application package for the recipient's architecture. The script
+validates both native payloads, bundle identity, architecture entries, and byte-for-byte
+inclusion of the input packages before signing (which can rewrite embedded signatures).
+Signed output is then checked with SignTool. Only the two MSIX files are included, not adjacent
+symbols or installer scripts.
+
+Run `tools\Test-MsixBundle.ps1 -X64Package $x64.Path -Arm64Package $arm64.Path`
+to exercise bundle creation and identity/architecture guardrails using temporary output.
+
+For a signed bundle, omit `-Unsigned` and supply `-CertificateThumbprint` and optionally
+`-TimestampUrl`, just as for individual packages. The signing certificate's subject must
+match the bundle publisher. An unsigned bundle is only a signing/submission candidate;
+packaging it as a bundle does not establish trust or publish it anywhere.
 
 ## Versions
 

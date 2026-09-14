@@ -253,10 +253,18 @@ Settings retain their existing immediate auto-save and live-filter behavior.
 preserving search, selection, notes, and scroll position (subject to live data and filter updates).
 The titlebar buttons can switch directly between panes; keyboard focus moves to Back on entry
 and returns to the corresponding titlebar button on exit.
+The Escape accelerator's automatic key-tip tooltip is hidden; the shortcut still works.
 
-Information shows the embedded date-based build name, a link to the
-[GitHub repository](https://github.com/TimothyMothra/Searchlight-SessionViewer), app purpose,
-basic session/task/resume guidance, local-data storage behavior, and tray versus no-tray behavior.
+Information starts with the app title, a combined version-and-channel line, subtitle, and
+description. Usage guidance, local-data storage, and tray behavior follow. A final
+**Source Control** section displays the raw clickable
+[GitHub repository URL](https://github.com/TimothyMothra/Searchlight-SessionViewer).
+Each sentence in **Your data** occupies its own unwrapped line, with horizontal scrolling
+available in narrow windows. Only Dev builds mention Production/Dev sharing; other builds
+describe the storage location without development-channel details.
+**Window and tray** describes only the current launch mode. Normal launches explain
+tray behavior; the command-line `--no-tray` option, available in all channels, gets
+its own accurate instructions only when used.
 
 ### Resume (`ResumeLauncher`)
 

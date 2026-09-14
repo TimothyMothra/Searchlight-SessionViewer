@@ -27,6 +27,26 @@ function Invoke-MsixTool {
     if ($LASTEXITCODE -ne 0) { throw "$Tool failed with exit code $LASTEXITCODE." }
 }
 
+function Assert-MsixSigningCertificate {
+    param([string]$Thumbprint, [string]$Publisher)
+    if (-not $Thumbprint) { throw 'Supply CertificateThumbprint, or explicitly use Unsigned for inspection only.' }
+    $certificate = Get-Item "Cert:\CurrentUser\My\$Thumbprint" -ErrorAction Stop
+    if (-not $certificate.HasPrivateKey -or $certificate.Subject -cne $Publisher) {
+        throw 'The signing certificate must have a private key and its Subject must exactly match Publisher.'
+    }
+    if ($certificate.NotAfter -le [datetime]::Now -or $certificate.NotBefore -gt [datetime]::Now) {
+        throw 'The signing certificate is not currently valid.'
+    }
+}
+
+function Invoke-MsixSigning {
+    param([string]$SignTool, [string]$Path, [string]$Thumbprint, [uri]$TimestampUrl)
+    $arguments = @('sign', '/fd', 'SHA256', '/sha1', $Thumbprint)
+    if ($TimestampUrl) { $arguments += @('/tr', $TimestampUrl.AbsoluteUri, '/td', 'SHA256') }
+    $arguments += $Path
+    Invoke-MsixTool $SignTool $arguments
+}
+
 function Get-MsixManifest {
     param([string]$Path)
     $zip = [IO.Compression.ZipFile]::OpenRead([IO.Path]::GetFullPath($Path))

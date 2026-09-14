@@ -37,14 +37,7 @@ else {
 
 if ($Unsigned -and $CertificateThumbprint) { throw 'Choose signing or Unsigned, not both.' }
 if (-not $Unsigned) {
-    if (-not $CertificateThumbprint) { throw 'Supply CertificateThumbprint, or explicitly use Unsigned for inspection only.' }
-    $certificate = Get-Item "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
-    if (-not $certificate.HasPrivateKey -or $certificate.Subject -cne $Publisher) {
-        throw 'The signing certificate must have a private key and its Subject must exactly match Publisher.'
-    }
-    if ($certificate.NotAfter -le [datetime]::Now -or $certificate.NotBefore -gt [datetime]::Now) {
-        throw 'The signing certificate is not currently valid.'
-    }
+    Assert-MsixSigningCertificate $CertificateThumbprint $Publisher
 }
 
 if (-not $BuildName) {
@@ -122,10 +115,7 @@ $packages = @(Get-ChildItem $output -Recurse -Filter *.msix |
 if ($packages.Count -ne 1) { throw "Expected one MSIX in '$output', found $($packages.Count)." }
 $package = $packages[0].FullName
 if (-not $Unsigned) {
-    $signArguments = @('sign', '/fd', 'SHA256', '/sha1', $CertificateThumbprint)
-    if ($TimestampUrl) { $signArguments += @('/tr', $TimestampUrl.AbsoluteUri, '/td', 'SHA256') }
-    $signArguments += $package
-    Invoke-MsixTool $tools.SignTool $signArguments
+    Invoke-MsixSigning $tools.SignTool $package $CertificateThumbprint $TimestampUrl
 }
 $result = & (Join-Path $PSScriptRoot 'Test-MsixPackage.ps1') -Path $package -ExpectedName $PackageName `
     -ExpectedPublisher $Publisher -ExpectedVersion $PackageVersion -ExpectedArchitecture $Architecture `
