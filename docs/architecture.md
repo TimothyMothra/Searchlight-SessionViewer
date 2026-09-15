@@ -74,7 +74,7 @@ Windows-only assembly. The host and the tests depend on Core.
 | **Abstractions** | `IUiDispatcher`, `IResumeLauncher`, `ISessionWatcher` | Platform seams the host implements. Keep Core free of WinUI/Win32/`Process`. |
 | **View-models** | `MainViewModel`, `DetailsViewModel`, `TodosViewModel` | MVVM (CommunityToolkit.Mvvm). Own the grouped session list, selection, filter, Resume command, and independently activated Todos snapshot. |
 | **Composition** | `ServiceCollectionExtensions.AddCopilotCore(useMock)` | Registers all of the above into an `IServiceCollection`. |
-| **Diagnostics** | `CoreLog` | A `static Action<string> Sink` seam the host points at its log file (Core can't see the exe's logger). |
+| **Diagnostics** | `CoreLog`, `MonitoringPolicy` | Consent-gated sink shared by Core/host. Dev is always enabled; Production/unpackaged require the saved opt-in. `EnabledChanged` releases active render observers on opt-out. |
 
 ---
 
@@ -177,6 +177,10 @@ manually (double-dispose). See `App.ExitApplication`.
   and stay hidden before activation, during loading, or after a load failure. File last-modified
   times show full local date/time with UTC offset. Details uses an I/O-free, explicit metadata
   display allowlist grouped by native source; absent booleans/counts are not fabricated as false/zero.
+  Overview is immediately realized; advanced metadata bodies use effective-viewport intersection
+  plus `x:Load`, with estimated-height placeholders preserving scroll extent. Scrolling reveals
+  the controls automatically, not via expanders. Stable observable group instances avoid
+  resetting unchanged visual trees on refresh, and no new disk/SQLite reads happen on scroll.
 - **Agent tasks** (the `todos` table) live on the second tab beneath the shared session header,
   with an introductory paragraph explaining the read-only work list. Every explicit activation
   and its dedicated **Refresh** action reads a fresh snapshot off-thread; there is no polling,
@@ -202,6 +206,12 @@ manually (double-dispose). See `App.ExitApplication`.
   delays so a headless benchmark is not mistaken for end-to-end WinUI startup performance.
   Accumulated queue-wait time overlaps producer work and must not be added to reader time as
   though they were sequential stages.
+  Detail logging now separates cache/read work, metadata projection, publication, and actual
+  UI control realization/layout observations/next render tick. Correlation uses request and
+  presentation counters, not session text. Render event handlers exist only while a sample is
+  pending; completion, unload, viewport exit, opt-out, and disposal release them.
+  A render tick is not GPU presentation or isolated CPU layout time. See the monitoring
+  contract in [engineering.md](engineering.md) before interpreting these overlapping milestones.
 
 **Live refresh:** `SessionWatcher` wraps a `FileSystemWatcher` on `~/.copilot/session-state` and
 raises a single **debounced** `Changed` event for structural session/lock changes. `MainViewModel`

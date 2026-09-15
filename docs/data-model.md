@@ -85,6 +85,14 @@ runtime configuration, file-presence flags, and both prompts. Unknown is a dash,
 known **No** or **0**. File flags wait for enrichment; session kind is labeled as inferred.
 Event model/reasoning are labeled as bounded head previews, not authoritative live state.
 
+**Scroll-driven realization.** Overview is built immediately. The other groups keep their
+headings and a lightweight estimated body height, but their row controls use `x:Load` and
+are created only when the group intersects the effective viewport. No expander click is
+required, and there are no additional source reads on scroll: the values already come from
+the selected session's native metadata. Realized groups remain available while browsing that
+session. Unchanged groups retain their instances across refreshes; changed groups preserve
+their realized state. A different session resets realization and scrolls back to Overview.
+
 **Prompt previews.** Details shows **First prompt** followed by **Last prompt**. Both use
 nonempty `user.message.data.content` strings, flatten line breaks, and truncate after 2,000
 characters with an ellipsis (the UI also caps each preview at 24 lines). Last prompt reads
@@ -177,7 +185,7 @@ stored fields it exposes computed **projections**:
 | `SessionTodo` | id, title, description, raw status, created_at and updated_at as stored strings | `session.db` |
 | `SessionTodosResult` | rows, `Status` (`Success`/`MissingDatabase`/`MissingTable`/`UnsupportedSchema`/`Unavailable`), missing fields, message | one explicit todo read |
 | `SessionGroup` | `ObservableCollection<SessionInfo>` + `Key` header text | built by `MainViewModel` |
-| `AppSettings` | `UseSharedTerminalWindow`, `RunElevated`, `AppendYolo`, `HideEmptySessions`, `HideUnnamedSessions` | `settings.json` (app-owned, writable) |
+| `AppSettings` | `UseSharedTerminalWindow`, `RunElevated`, `AppendYolo`, `HideEmptySessions`, `HideUnnamedSessions`, `EnableMonitoring` (default false; Dev always monitors) | `settings.json` (app-owned, writable) |
 
 > `settings.json` at `%LOCALAPPDATA%\Searchlight\` is the **only** file the app writes — it
 > is app configuration, not user Copilot data.

@@ -34,6 +34,13 @@ public sealed partial class AppSettings : ObservableObject
     private bool _runElevated;
 
     /// <summary>
+    /// Opts Production and unpackaged launches into local diagnostic logging.
+    /// Dev always monitors without changing this shared preference.
+    /// </summary>
+    [ObservableProperty]
+    private bool _enableMonitoring;
+
+    /// <summary>
     /// When true, every Resume appends <c>--yolo</c> to the <c>copilot --resume</c>
     /// command so the resumed session runs with all tool approvals auto-granted.
     /// Opt-in only (default false) because it bypasses per-action confirmation.

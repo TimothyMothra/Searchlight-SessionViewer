@@ -123,6 +123,7 @@ public sealed class SettingsService
     {
         UseSharedTerminalWindow = value.UseSharedTerminalWindow,
         RunElevated = value.RunElevated,
+        EnableMonitoring = value.EnableMonitoring,
         AppendYolo = value.AppendYolo,
         UseCustomResumeCommand = value.UseCustomResumeCommand,
         CustomResumeCommand = value.CustomResumeCommand,
@@ -140,6 +141,7 @@ public sealed class SettingsService
         AppSettings result = Clone(disk);
         if (local.UseSharedTerminalWindow != baseline.UseSharedTerminalWindow) result.UseSharedTerminalWindow = local.UseSharedTerminalWindow;
         if (local.RunElevated != baseline.RunElevated) result.RunElevated = local.RunElevated;
+        if (local.EnableMonitoring != baseline.EnableMonitoring) result.EnableMonitoring = local.EnableMonitoring;
         if (local.AppendYolo != baseline.AppendYolo) result.AppendYolo = local.AppendYolo;
         if (local.UseCustomResumeCommand != baseline.UseCustomResumeCommand) result.UseCustomResumeCommand = local.UseCustomResumeCommand;
         if (local.CustomResumeCommand != baseline.CustomResumeCommand) result.CustomResumeCommand = local.CustomResumeCommand;
@@ -162,6 +164,9 @@ public sealed class SettingsService
         IsReloading = true;
         try
         {
+            // ASSUMPTION: monitoring observers must see an external opt-out before
+            // any other preference callback can emit diagnostics during this reload.
+            Current.EnableMonitoring = value.EnableMonitoring;
             Current.UseSharedTerminalWindow = value.UseSharedTerminalWindow;
             Current.RunElevated = value.RunElevated;
             Current.AppendYolo = value.AppendYolo;
@@ -185,7 +190,7 @@ public sealed class SettingsService
     private void Report(string message, Exception ex)
     {
         PersistenceNotice = $"{message} {ex.Message}";
-        CoreLog.Write($"{PersistenceNotice} {ex}");
+        if (CoreLog.IsEnabled) CoreLog.Write($"{PersistenceNotice} {ex}");
         PersistenceFailed?.Invoke(this, EventArgs.Empty);
     }
 }

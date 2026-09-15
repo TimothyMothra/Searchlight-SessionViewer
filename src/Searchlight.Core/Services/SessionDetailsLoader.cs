@@ -1,4 +1,6 @@
 using Searchlight.Models;
+using Searchlight.Diagnostics;
+using System.Diagnostics;
 
 namespace Searchlight.Services;
 
@@ -10,7 +12,8 @@ internal enum SessionDetailSection
 
 internal sealed record SessionDetails(
     SessionInfo Session,
-    IReadOnlyList<CheckpointInfo> Checkpoints);
+    IReadOnlyList<CheckpointInfo> Checkpoints,
+    bool FromCache = false);
 
 internal sealed class SessionDetailsLoader(ISessionDataSource source)
 {
@@ -21,12 +24,20 @@ internal sealed class SessionDetailsLoader(ISessionDataSource source)
     private readonly LinkedList<(string Path, string Id, SessionDetailSection Section, string Version, SessionDetails Details)> _cache = [];
 
     public async Task<SessionDetails> LoadAsync(
-        SessionInfo session, CancellationToken token, SessionDetailSection section = SessionDetailSection.Details)
+        SessionInfo session, CancellationToken token, SessionDetailSection section = SessionDetailSection.Details,
+        int requestId = 0)
     {
+        bool monitoring = CoreLog.IsEnabled;
+        long queued = monitoring ? Stopwatch.GetTimestamp() : 0;
         await _gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
-            return await Task.Run(() => Read(session, section, token), token).ConfigureAwait(false);
+            long started = monitoring ? Stopwatch.GetTimestamp() : 0;
+            SessionDetails result = await Task.Run(() => Read(session, section, token), token).ConfigureAwait(false);
+            if (monitoring)
+                CoreLog.Write(FormattableString.Invariant(
+                    $"DetailsRead request={requestId} section={section} cached={result.FromCache} queue_ms={Stopwatch.GetElapsedTime(queued, started).TotalMilliseconds:F3} worker_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}"));
+            return result;
         }
         finally
         {
@@ -54,6 +65,7 @@ internal sealed class SessionDetailsLoader(ISessionDataSource source)
                 return entry.Details with
                 {
                     Session = current with { Start = entry.Details.Session.Start },
+                    FromCache = true,
                 };
             }
             break;

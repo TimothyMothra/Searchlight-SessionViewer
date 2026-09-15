@@ -66,34 +66,47 @@ public partial class App : Application
     private static readonly string ShowWindowEventName = $"{AppIdentity.InstancePrefix}.SingleInstance.ShowWindow";
     private static readonly string ExitEventName = $"{AppIdentity.InstancePrefix}.SingleInstance.Exit";
 
-    // ASSUMPTION: temporary diagnostic sink to capture the UI-thread stowed
-    // exception (WER shows only 0xc000027b in Microsoft.UI.Xaml.dll). Remove
-    // this logging after the black-window/crash is root-caused.
+    private static readonly object s_logLock = new();
+
+    // ASSUMPTION: no Production/unpackaged writes are permitted until settings
+    // consent is loaded; Dev diagnostics are available from the first launch step.
+    private static volatile bool s_monitoringEnabled =
+        MonitoringPolicy.IsEnabled(AppIdentity.Channel, enableMonitoring: null);
+
     private static readonly string LogPath =
         System.IO.Path.Combine(System.IO.Path.GetTempPath(), AppIdentity.LogFileName);
 
     internal static void Log(string message)
     {
-        try
+        if (!s_monitoringEnabled) return;
+        lock (s_logLock)
         {
-            System.IO.File.AppendAllText(
-                LogPath,
-                $"{System.DateTimeOffset.Now:o} {message}{System.Environment.NewLine}");
-        }
-        catch
-        {
-            // Never let diagnostic logging throw.
+            // ASSUMPTION: UI and worker diagnostics share one file. Recheck
+            // consent after waiting so queued writers cannot outlive an opt-out.
+            if (!s_monitoringEnabled) return;
+            try
+            {
+                System.IO.File.AppendAllText(
+                    LogPath,
+                    $"{System.DateTimeOffset.Now:o} {message}{System.Environment.NewLine}");
+            }
+            catch
+            {
+                // Never let diagnostic logging throw.
+            }
         }
     }
 
     // Verbose breadcrumbs (e.g. per-move resize tracing) are noisy and only useful
     // when actively diagnosing. They stay in the code but are gated behind the
-    // SEARCHLIGHT_VERBOSE=1 environment variable so normal runs keep a clean log.
-    internal static bool VerboseLogging { get; } =
+    // SEARCHLIGHT_VERBOSE=1 environment variable, which never overrides consent.
+    private static readonly bool s_verboseRequested =
         string.Equals(
             System.Environment.GetEnvironmentVariable("SEARCHLIGHT_VERBOSE"),
             "1",
             System.StringComparison.Ordinal);
+
+    internal static bool VerboseLogging => s_monitoringEnabled && s_verboseRequested;
 
     /// <summary>Logs only when <see cref="VerboseLogging"/> is enabled.</summary>
     internal static void LogVerbose(string message)
@@ -106,13 +119,10 @@ public partial class App : Application
 
     public App()
     {
+        UpdateMonitoring(enableMonitoring: null);
         InitializeComponent();
 
         Log("=== App ctor ===");
-
-        // Route the platform-neutral core's diagnostic breadcrumbs into the same
-        // log file the host uses (Core cannot reference the exe's App.Log directly).
-        CoreLog.Sink = Log;
 
         UnhandledException += (_, e) =>
         {
@@ -142,6 +152,17 @@ public partial class App : Application
 
         Log("OnLaunched: loading settings");
         var settingsService = new SettingsService();
+        _settingsService = settingsService;
+        UpdateMonitoring(settingsService.Current.EnableMonitoring);
+        // Disable before the service's auto-save callback can report a failure.
+        // Enabling waits until PropertyChanged so the new preference is current.
+        settingsService.Current.PropertyChanging += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AppSettings.EnableMonitoring)
+                && settingsService.Current.EnableMonitoring)
+                UpdateMonitoring(enableMonitoring: false);
+        };
+        settingsService.Current.PropertyChanged += OnSettingsChanged;
 
         // ASSUMPTION: automation launches from a standard-user shell. Do not
         // silently claim a non-admin launch if an elevated parent supplied its token.
@@ -168,10 +189,6 @@ public partial class App : Application
 
             Log("OnLaunched: elevation cancelled/failed; continuing non-elevated");
         }
-
-        _settingsService = settingsService;
-        // React when the user flips a setting at runtime (e.g. turns on elevation).
-        settingsService.Current.PropertyChanged += OnSettingsChanged;
 
         // Launch modes (unpackaged: read the raw process command line).
         //   --no-tray : run as a plain window, no tray icon; close = exit.
@@ -418,6 +435,17 @@ public partial class App : Application
         sender.Hide();
     }
 
+    private static void UpdateMonitoring(bool? enableMonitoring)
+    {
+        lock (s_logLock)
+        {
+            s_monitoringEnabled = MonitoringPolicy.IsEnabled(AppIdentity.Channel, enableMonitoring);
+        }
+        // Notify UI subscribers outside the I/O lock; an opt-out has now drained
+        // any in-flight append and prevents queued writers from entering the sink.
+        CoreLog.Sink = s_monitoringEnabled ? Log : null;
+    }
+
     /// <summary>
     /// Handles runtime settings changes. Reacts to the elevation toggle in both
     /// directions: turning "Run as administrator" ON while non-elevated relaunches
@@ -429,6 +457,13 @@ public partial class App : Application
     /// </summary>
     private void OnSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // External refreshes suppress elevation restarts, not consent updates.
+        if (e.PropertyName == nameof(AppSettings.EnableMonitoring))
+        {
+            UpdateMonitoring(_settingsService?.Current.EnableMonitoring);
+            return;
+        }
+
         if (NoAdmin || _settingsService?.IsReloading == true ||
             e.PropertyName != nameof(AppSettings.RunElevated))
         {

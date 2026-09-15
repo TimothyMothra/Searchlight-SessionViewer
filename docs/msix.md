@@ -189,7 +189,9 @@ the normal save nor durable conflict recovery can preserve pending notes.
 
 Each channel has its own process mutex, activation event, window/tray label, and log:
 `%TEMP%\Searchlight.Dev.log`, `Searchlight.Production.log`, or
-`Searchlight.Unpackaged.log`. A second launch activates only its own channel.
+`Searchlight.Unpackaged.log`. Dev always writes monitoring logs; Production and unpackaged
+builds require the shared `EnableMonitoring` opt-in, which defaults off. A second launch
+activates only its own channel.
 Dev has an orange badge on its package logos and declares no startup task, so it does not
 appear as an auto-start option in the app or Windows Settings. Production exposes
 **Start Searchlight when I sign in**, reflecting OS startup state rather than shared JSON.

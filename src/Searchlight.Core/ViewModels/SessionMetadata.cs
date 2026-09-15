@@ -1,5 +1,8 @@
 using System.Globalization;
 using System.Windows.Input;
+using System.Diagnostics;
+using CommunityToolkit.Mvvm.ComponentModel;
+using Searchlight.Diagnostics;
 using Searchlight.Models;
 
 namespace Searchlight.ViewModels;
@@ -8,7 +11,46 @@ public sealed record SessionMetadataField(string Property, string Label, string 
 {
     public bool CanCopy => CopyCommand is not null;
 }
-public sealed record SessionMetadataGroup(string Title, string Source, IReadOnlyList<SessionMetadataField> Fields);
+public sealed partial class SessionMetadataGroup : ObservableObject
+{
+    public string Title { get; }
+    public string Source { get; }
+    public IReadOnlyList<SessionMetadataField> Fields { get; }
+    public long PresentationId { get; internal set; }
+    public long MaterializationRequestedAt { get; private set; }
+    public bool IsOverview { get; }
+
+    // ASSUMPTION: reserve roughly one wrapped row per field before realizing its controls.
+    // This preserves a scrollable extent; visible sections replace the estimate with real layout.
+    public double PlaceholderHeight => Fields.Count * 34;
+
+    [ObservableProperty]
+    private bool _isMaterialized;
+
+    public SessionMetadataGroup(string title, string source, IReadOnlyList<SessionMetadataField> fields, bool isOverview = false)
+    {
+        Title = title;
+        Source = source;
+        Fields = fields;
+        IsOverview = isOverview;
+        if (isOverview) Materialize();
+    }
+
+    public bool Materialize()
+    {
+        if (IsMaterialized) return false;
+        MaterializationRequestedAt = CoreLog.IsEnabled ? Stopwatch.GetTimestamp() : 0;
+        IsMaterialized = true;
+        return true;
+    }
+
+    public long TakeMaterializationTimestamp()
+    {
+        long timestamp = MaterializationRequestedAt;
+        MaterializationRequestedAt = 0;
+        return timestamp;
+    }
+}
 
 /// <summary>Explicit display allowlist of parsed native Copilot metadata; no I/O or reflection.</summary>
 public static class SessionMetadata
@@ -40,7 +82,7 @@ public static class SessionMetadata
                 Field(nameof(WorkspaceMetadata.UpdatedAt), "Updated", workspace?.UpdatedAt),
                 Field(nameof(SessionStartInfo.FirstUserPrompt), "First prompt", start?.FirstUserPrompt),
                 Field(nameof(SessionStartInfo.LastUserPrompt), "Last prompt", start?.LastUserPrompt),
-            ]),
+            ], isOverview: true),
             new("Workspace metadata", "workspace.yaml; optional fields depend on the Copilot client/version.",
             [
                 Field(nameof(WorkspaceMetadata.Id), "Workspace ID", workspace?.Id),

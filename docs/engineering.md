@@ -171,10 +171,44 @@ everything it *can* before erroring, which silently leaves a half-deleted, unlau
 install behind. Shared settings and notes live under `%USERPROFILE%\.searchlight`,
 outside both the unpackaged install folder and MSIX-managed package storage.
 
-**Diagnostics:** the app writes breadcrumbs to `%TEMP%\Searchlight.<channel>.log`
-(`Dev`, `Production`, or `Unpackaged`). Core routes its
-own breadcrumbs there through the `CoreLog.Sink` seam. A healthy live launch logs e.g.
+**Monitoring is opt-in outside Dev.** Settings exposes **Enable monitoring logs** in
+Production/unpackaged builds (`AppSettings.EnableMonitoring`, default **false**).
+The **Dev channel is always on**, regardless of the saved preference. The setting is shared
+and merge-safe like other preferences; it can be saved while previewing Dev for a later
+Production upgrade. It applies live and when settings reload. Production startup does not
+write logs before consent is known.
+
+All host/Core diagnostic and performance log writes honor this policy, including exception
+and verbose paths. `SEARCHLIGHT_VERBOSE=1` only enables extra detail within an already opted-in
+run; it cannot bypass opt-out. User-facing errors and persistence notices still work when
+monitoring is disabled. Logs are local, not uploaded, and may contain existing diagnostic
+paths/commands/error details; review them before sharing. Opt-out stops new entries without
+deleting existing logs.
+
+Enabled runs write to `%TEMP%\Searchlight.<channel>.log` (`Dev`, `Production`, or
+`Unpackaged`) through the shared `CoreLog`/host sink. A healthy live launch logs
 `published NNN rows in MM groups (total NNN)`; a mock launch logs `data source returned 15 sessions`.
+
+### Details rendering measurements
+
+- `DetailsRead`: request counter, section, cache hit, semaphore queue wait, and worker-phase
+  elapsed time (including scheduling, version checks, and source reads).
+- `DetailsProjection`: request/presentation counters, group/field counts, reused groups, and
+  metadata projection/publication elapsed time. No field values are recorded.
+- `DetailsPublication`: request/presentation counters, cache state, and read-through-publication
+  elapsed time on the view-model path.
+- `DetailsRender`: presentation/group, initial/viewport/reattach trigger, field count, dimensions,
+  observed layout updates, and elapsed milestones from the materialization request through
+  `Loaded`, first observed nonzero layout, and the next XAML render tick.
+  Unloaded/hidden/out-of-viewport samples are canceled instead of reported as completed.
+  Retained controls reattaching after navigation use `Loaded` as their baseline, rather than
+  counting time spent on another tab as control creation.
+
+The render milestones **overlap; do not add them**. They include UI scheduling and control
+creation/binding, not just CPU execution. The next render tick is **not GPU presentation**.
+Render handlers unsubscribe after completion/cancellation and on monitoring opt-out; there is
+no continuous per-frame polling once the pending samples finish. New timers and render samples
+are disabled on the opted-out path. Existing footer load-time reporting remains available.
 
 ---
 

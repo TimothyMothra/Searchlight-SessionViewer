@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Searchlight.Abstractions;
@@ -28,6 +29,7 @@ public sealed partial class DetailsViewModel : ObservableObject
     private CancellationTokenSource? _loadCancellation;
     private int _generation;
     private bool _updatingSession;
+    private long _presentationSequence;
 
     /// <summary>Creates a details view-model bound to the data source, resume launcher, and clipboard.</summary>
     public DetailsViewModel(ISessionDataSource dataSource, IResumeLauncher resume, IClipboardService clipboard)
@@ -42,7 +44,7 @@ public sealed partial class DetailsViewModel : ObservableObject
     /// <summary>The session currently shown, enriched with events-head data.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSession))]
-    [NotifyPropertyChangedFor(nameof(ShowNoCheckpoints), nameof(MetadataGroups))]
+    [NotifyPropertyChangedFor(nameof(ShowNoCheckpoints))]
     [NotifyCanExecuteChangedFor(nameof(ResumeCommand))]
     [NotifyCanExecuteChangedFor(nameof(CopyIdCommand))]
     private SessionInfo? _session;
@@ -53,8 +55,46 @@ public sealed partial class DetailsViewModel : ObservableObject
     /// <summary>Checkpoints for the current session (newest first).</summary>
     public ObservableCollection<CheckpointInfo> Checkpoints { get; } = [];
 
-    /// <summary>Presentation-only projection; it never reads another source or tab.</summary>
-    public IReadOnlyList<SessionMetadataGroup> MetadataGroups => SessionMetadata.Create(Session, CopyIdCommand);
+    /// <summary>Stable, presentation-only groups; lower sections realize their controls on viewport entry.</summary>
+    public ObservableCollection<SessionMetadataGroup> MetadataGroups { get; } = [];
+
+    partial void OnSessionChanged(SessionInfo? oldValue, SessionInfo? newValue)
+    {
+        bool monitoring = CoreLog.IsEnabled;
+        long started = monitoring ? Stopwatch.GetTimestamp() : 0;
+        SessionMetadataGroup[] groups = [.. SessionMetadata.Create(newValue, CopyIdCommand)];
+        bool sameSession = oldValue?.Id == newValue?.Id && oldValue?.FolderPath == newValue?.FolderPath;
+        int reused = 0;
+        long presentation = ++_presentationSequence;
+        for (int i = 0; i < groups.Length; i++)
+        {
+            groups[i].PresentationId = presentation;
+            if (!sameSession || i >= MetadataGroups.Count) continue;
+            SessionMetadataGroup previous = MetadataGroups[i];
+            if (previous.Title != groups[i].Title || previous.Source != groups[i].Source) continue;
+            if (previous.Fields.SequenceEqual(groups[i].Fields))
+            {
+                groups[i] = previous;
+                reused++;
+            }
+            else if (previous.IsMaterialized)
+            {
+                // Preserve scroll-driven realization for this session across metadata refreshes.
+                groups[i].Materialize();
+            }
+        }
+        // Replace only changed groups so unrelated refreshes do not recreate their controls.
+        while (MetadataGroups.Count > groups.Length) MetadataGroups.RemoveAt(MetadataGroups.Count - 1);
+        for (int i = 0; i < groups.Length; i++)
+        {
+            if (i == MetadataGroups.Count) MetadataGroups.Add(groups[i]);
+            else if (!ReferenceEquals(MetadataGroups[i], groups[i])) MetadataGroups[i] = groups[i];
+        }
+
+        if (monitoring)
+            CoreLog.Write(FormattableString.Invariant(
+                $"DetailsProjection request={_generation} presentation={presentation} groups={groups.Length} fields={groups.Sum(g => g.Fields.Count)} reused_groups={reused} elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}"));
+    }
 
     /// <summary>Explicitly activated, independent todo snapshot.</summary>
     public TodosViewModel Todos { get; }
@@ -194,9 +234,11 @@ public sealed partial class DetailsViewModel : ObservableObject
     private async Task LoadCoreAsync(
         SessionInfo session, SessionDetailSection section, int generation, CancellationToken token)
     {
+        bool monitoring = CoreLog.IsEnabled;
+        long started = monitoring ? Stopwatch.GetTimestamp() : 0;
         try
         {
-            SessionDetails details = await _loader.LoadAsync(session, token, section).ConfigureAwait(true);
+            SessionDetails details = await _loader.LoadAsync(session, token, section, generation).ConfigureAwait(true);
             if (generation != _generation || token.IsCancellationRequested) return;
             switch (section)
             {
@@ -213,6 +255,9 @@ public sealed partial class DetailsViewModel : ObservableObject
                     HasLoadedCheckpoints = true;
                     break;
             }
+            if (monitoring)
+                CoreLog.Write(FormattableString.Invariant(
+                    $"DetailsPublication request={generation} section={section} presentation={_presentationSequence} cached={details.FromCache} elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}"));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (IOException ex)

@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
+using System.ComponentModel;
 using System.Reflection;
 
 namespace Searchlight.Views;
@@ -24,6 +25,9 @@ public sealed partial class MainView : UserControl
     public MainViewModel ViewModel { get; }
     public StartupSettingsViewModel Startup { get; } = new(new StartupRegistration());
     public bool ShowStartupSetting => AppIdentity.Channel == "Production";
+    public bool IsDevChannel => AppIdentity.Channel == "Dev";
+    public bool CanConfigureMonitoring => !IsDevChannel;
+    public string MonitoringLogPath => System.IO.Path.Combine(System.IO.Path.GetTempPath(), AppIdentity.LogFileName);
 
     /// <summary>
     /// The custom title bar drag strip. The host <see cref="MainWindow"/> passes this
@@ -73,6 +77,9 @@ public sealed partial class MainView : UserControl
             ?? throw new InvalidOperationException("The app build is missing its informational version.")}";
 
     private Button? _paneSourceButton;
+    private DetailsRenderMonitor? _detailsRenderMonitor;
+    private string? _detailsSessionId;
+    private string? _detailsSessionPath;
 
     /// <summary>
     /// The host window's native HWND, injected by <see cref="MainWindow"/> after the content
@@ -84,7 +91,11 @@ public sealed partial class MainView : UserControl
     public MainView(MainViewModel viewModel)
     {
         ViewModel = viewModel;
+        _detailsRenderMonitor = new DetailsRenderMonitor(DispatcherQueue);
         InitializeComponent();
+        ViewModel.Details.PropertyChanged += OnDetailsPropertyChanged;
+        Loaded += OnViewLoaded;
+        Unloaded += OnViewUnloaded;
 
         // Wire the grouped list in code-behind: an x:Bind CollectionViewSource
         // Source inside UserControl.Resources is unreliable in WinUI 3, so build
@@ -96,6 +107,45 @@ public sealed partial class MainView : UserControl
             Source = ViewModel.SessionGroups,
         };
         SessionList.ItemsSource = groupedSource.View;
+    }
+
+    private void OnViewLoaded(object sender, RoutedEventArgs e) =>
+        _detailsRenderMonitor ??= new DetailsRenderMonitor(DispatcherQueue);
+
+    private void OnViewUnloaded(object sender, RoutedEventArgs e)
+    {
+        _detailsRenderMonitor?.Dispose();
+        _detailsRenderMonitor = null;
+    }
+
+    private void OnDetailsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DetailsViewModel.IsDetailsTabSelected))
+            _detailsRenderMonitor?.SetActive(ViewModel.Details.IsDetailsTabSelected);
+        if (e.PropertyName != nameof(DetailsViewModel.Session)) return;
+        var session = ViewModel.Details.Session;
+        if (_detailsSessionId == session?.Id && _detailsSessionPath == session?.FolderPath) return;
+        _detailsSessionId = session?.Id;
+        _detailsSessionPath = session?.FolderPath;
+        // New sessions start at Overview; same-session refreshes retain the scroll position.
+        DetailsScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
+    }
+
+    private void OnMetadataGroupViewportChanged(FrameworkElement sender, EffectiveViewportChangedEventArgs e)
+    {
+        if (sender.Tag is not SessionMetadataGroup group) return;
+        var viewport = e.EffectiveViewport;
+        bool visible = ViewModel.Details.IsDetailsTabSelected &&
+            MetadataViewport.Intersects(sender.ActualWidth, sender.ActualHeight,
+                viewport.X, viewport.Y, viewport.Width, viewport.Height);
+        if (visible) group.Materialize();
+        else _detailsRenderMonitor?.CancelGroup(group);
+    }
+
+    private void OnMetadataFieldsLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: SessionMetadataGroup group } element)
+            _detailsRenderMonitor?.TrackLoaded(element, group);
     }
 
     private async void OnSettingsClick(object sender, RoutedEventArgs e)
