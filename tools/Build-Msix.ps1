@@ -18,8 +18,8 @@ $projectRoot = Join-Path $repo 'src\Searchlight'
 $tools = Get-MsixTools
 
 if ($Channel -eq 'Production') {
-    if (-not $PackageName -or -not $Publisher -or -not $BuildName) {
-        throw 'Production requires explicit PackageName, Publisher, and a release-controlled BuildName.'
+    if (-not $PackageName -or -not $Publisher) {
+        throw 'Production requires explicit PackageName and Publisher.'
     }
     if ($Configuration -eq 'Demo') { throw 'Synthetic Demo builds cannot target Production.' }
     if ($PackageName -eq 'TimothyMothra.Searchlight.Dev') { throw 'Production cannot use the Dev identity.' }
@@ -41,10 +41,10 @@ if (-not $Unsigned) {
 }
 
 if (-not $BuildName) {
-    # ASSUMPTION: all local worktrees update one Dev installation. Its allocation
-    # state lives outside worktrees; ordinary unpackaged builds retain their own counter.
-    $state = Join-Path $env:LOCALAPPDATA 'Searchlight.Build\Dev'
-    $BuildName = & (Join-Path $PSScriptRoot 'Get-NextBuildVersion.ps1') -StateDirectory $state
+    $BuildName = & (Join-Path $PSScriptRoot 'Get-NextBuildVersion.ps1')
+}
+else {
+    $BuildName = & (Join-Path $PSScriptRoot 'Get-NextBuildVersion.ps1') -BuildName $BuildName
 }
 $parsedDate = [datetime]::MinValue
 if ($BuildName -notmatch '^\d{4}\.\d{2}\.\d{2}\.(0[1-9]|[1-9][0-9])$' -or
@@ -75,8 +75,19 @@ $manifest.Package.Properties.DisplayName = $displayName
 $visuals = $manifest.SelectSingleNode("//*[local-name()='VisualElements']")
 $visuals.SetAttribute('DisplayName', $displayName)
 $startup = $manifest.SelectSingleNode("//*[local-name()='StartupTask']")
-$startup.SetAttribute('DisplayName', $displayName)
-$startup.SetAttribute('Enabled', $(if ($Channel -eq 'Production') { 'true' } else { 'false' }))
+if ($Channel -eq 'Dev') {
+    # Dev must not appear as an auto-start option, even in Windows Settings.
+    $extension = $startup.ParentNode
+    $extensions = $extension.ParentNode
+    [void]$extensions.RemoveChild($extension)
+    if ($extensions.SelectNodes('*').Count -eq 0) {
+        [void]$extensions.ParentNode.RemoveChild($extensions)
+    }
+}
+else {
+    $startup.SetAttribute('DisplayName', $displayName)
+    $startup.SetAttribute('Enabled', 'true')
+}
 $manifestPath = Join-Path $stage 'Package.appxmanifest'
 $manifest.Save($manifestPath)
 

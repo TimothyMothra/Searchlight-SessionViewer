@@ -94,8 +94,9 @@ To build another architecture for the **same release**, pass the allocated name:
     -CertificateThumbprint $certificate.Thumbprint
 ```
 
-Production requires its final package name, publisher, release-controlled build
-name, and certificate. It does not use Dev's identity or automatically install:
+Production requires its final package name, publisher, and certificate. Its build name
+comes from the same sequence as Dev unless an allocated release name is supplied.
+It does not use Dev's identity or automatically install:
 
 ```powershell
 .\tools\Build-Msix.ps1 -Channel Production -Architecture x64 `
@@ -141,10 +142,21 @@ numeric quad, for example `2026.09.14.05` becomes `2026.9.14.5`.
 `-PackageVersion` can explicitly supply a different valid numeric quad for a
 distribution contract such as a reserved fourth component.
 
-Automatic Dev allocation is shared across worktrees on this machine in
-`%LOCALAPPDATA%\Searchlight.Build\Dev`. Unpackaged builds retain their existing
-worktree-local `obj\build-version` counters. Production requires an explicitly
-allocated release build name. Allocate once and reuse that name across architectures.
+All channels and build paths allocate from `%LOCALAPPDATA%\Searchlight.Build\Shared`
+for this user on this machine. Production and Dev no longer have independent sequences.
+Migration seeds the shared counter from the highest existing channel/worktree counter.
+Allocate once and reuse that name across channels and architectures when building the
+same source release:
+
+```powershell
+$version = .\tools\Get-NextBuildVersion.ps1
+.\tools\install.ps1 -Configuration Release -BuildName $version
+.\tools\Build-Msix.ps1 -BuildName $version -CertificateThumbprint '<development-thumbprint>'
+```
+
+An explicit name reserves its high-water mark without another increment; reusing a
+previous name never lowers the next automatic version. Separate CI machines need a
+persistent shared allocator location or externally allocated release names.
 
 Numbers run from 01 through 99 per local Gregorian date. Failed builds can consume
 numbers. Do not delete counters or reuse a version for different content.
@@ -178,9 +190,13 @@ the normal save nor durable conflict recovery can preserve pending notes.
 Each channel has its own process mutex, activation event, window/tray label, and log:
 `%TEMP%\Searchlight.Dev.log`, `Searchlight.Production.log`, or
 `Searchlight.Unpackaged.log`. A second launch activates only its own channel.
-Dev has an orange badge on its package logos and does not auto-start at login.
-Production declares a startup task enabled on first launch; Windows/user startup
+Dev has an orange badge on its package logos and declares no startup task, so it does not
+appear as an auto-start option in the app or Windows Settings. Production exposes
+**Start Searchlight when I sign in**, reflecting OS startup state rather than shared JSON.
+Packaged Production declares a startup task enabled on first launch; Windows/user startup
 settings still control it. Neither package creates the old Startup-folder shortcut.
+The unpackaged Production installation manages its existing Startup shortcut, and its
+installer preserves an absent/disabled shortcut on upgrades instead of re-enabling it.
 
 The manifest declares `runFullTrust` and `allowElevation` to preserve optional
 administrator behavior. Elevation remains subject to UAC and must be tested on the

@@ -116,10 +116,10 @@ manifests in intermediate output, not by repeatedly editing the tracked manifest
 Default local packaging to Dev and reject accidental production-targeted installs.
 Allocate one package release version before building multiple architectures.
 
-Keep the display name `YYYY.MM.DD.##`. The current counter under each worktree's
-`obj\build-version` is not sufficient as the authoritative published package sequence:
-different worktrees can produce equal or lower versions. Use a channel-wide local
-sequence for the one Dev installation, and a release-controlled sequence for Production.
+Keep the display name `YYYY.MM.DD.##`. Use one persistent per-user sequence across
+Production, Dev, direct builds, and worktrees. Seed from existing counters so migration
+cannot move numbering backward. Reuse an allocated name for multiple channel/architecture
+builds of the same source release; do not maintain separate channel counters.
 For ordinary sideloading, a numeric version such as `2026.9.14.4` can represent the
 display name `2026.09.14.04`. Preserve the option to map to a fourth-component-zero
 version if a future distribution contract requires it.
@@ -193,7 +193,7 @@ without selecting or submitting to a destination repository.
 - `src\Searchlight.Core\Services\CopilotPaths.cs` — read-only source paths; preserve this invariant.
 - `src\Searchlight\Assets` — package visual assets and existing executable/tray imagery.
 - `tools\install.ps1` — current unpackaged installer; not an MSIX deployment mechanism.
-- `tools\Get-NextBuildVersion.ps1` — worktree-local daily counter requiring a packaging-specific contract.
+- `tools\Get-NextBuildVersion.ps1` — shared daily allocator, legacy counter migration, and release-name reuse.
 
 ### Microsoft References
 

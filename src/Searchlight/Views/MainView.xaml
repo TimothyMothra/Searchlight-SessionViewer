@@ -110,6 +110,21 @@
                     <TextBlock Text="Changes are saved automatically."
                                TextWrapping="Wrap" Margin="0,0,0,16"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Spacing="8" Margin="0,0,0,16"
+                                Visibility="{x:Bind ShowStartupSetting, Converter={StaticResource BoolToVis}}">
+                        <ToggleSwitch Header="Start Searchlight when I sign in"
+                                      AutomationProperties.Name="Start Searchlight when I sign in"
+                                      IsOn="{x:Bind Startup.IsEnabled, Mode=OneWay}"
+                                      IsEnabled="{x:Bind Startup.CanChange, Mode=OneWay}"
+                                      Toggled="OnStartupToggled" />
+                        <TextBlock Text="Controls auto-start for this Production installation only."
+                                   TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="{x:Bind Startup.Message, Mode=OneWay}" TextWrapping="Wrap"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <HyperlinkButton Content="Open Windows startup settings"
+                                         NavigateUri="ms-settings:startupapps"
+                                         HorizontalAlignment="Left" Padding="0" />
+                    </StackPanel>
                     <TextBlock Text="Reuse my existing terminal window"
                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                TextWrapping="Wrap" />

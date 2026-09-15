@@ -1,19 +1,57 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Allocate')]
 param(
-    [Parameter(Mandatory)]
-    [string]$StateDirectory,
+    [string]$StateDirectory = (Join-Path $env:LOCALAPPDATA 'Searchlight.Build\Shared'),
 
-    [datetime]$BuildDate = [datetime]::Now
+    [Parameter(ParameterSetName = 'Allocate')]
+    [datetime]$BuildDate = [datetime]::Now,
+
+    [Parameter(Mandatory, ParameterSetName = 'Reuse')]
+    [string]$BuildName,
+
+    [string[]]$LegacyStateDirectory = @()
 )
 
 $ErrorActionPreference = 'Stop'
 $culture = [Globalization.CultureInfo]::InvariantCulture
-$date = $BuildDate.ToString('yyyy.MM.dd', $culture)
+$reuse = $PSCmdlet.ParameterSetName -eq 'Reuse'
+if ($reuse) {
+    $parsedDate = [datetime]::MinValue
+    if ($BuildName -notmatch '^\d{4}\.\d{2}\.\d{2}\.(0[1-9]|[1-9][0-9])$' -or
+        -not [datetime]::TryParseExact($BuildName.Substring(0,10), 'yyyy.MM.dd', $culture,
+            [Globalization.DateTimeStyles]::None, [ref]$parsedDate)) {
+        throw 'BuildName must be a valid Gregorian YYYY.MM.DD.01 through YYYY.MM.DD.99.'
+    }
+    $date = $parsedDate.ToString('yyyy.MM.dd', $culture)
+    $requestedNumber = [int]$BuildName.Substring(11)
+}
+else {
+    $date = $BuildDate.ToString('yyyy.MM.dd', $culture)
+}
 $StateDirectory = [IO.Path]::GetFullPath($StateDirectory)
 [IO.Directory]::CreateDirectory($StateDirectory) | Out-Null
 
-# ASSUMPTION: numbers are local to a worktree and use the build machine's calendar
-# date. One exclusive lock shares the counter across configurations and processes.
+# ASSUMPTION: every channel/worktree on this user account shares one daily sequence.
+# Explicit names reuse one release across channels/architectures without allocating
+# another number, but still advance the high-water mark if supplied by release tooling.
+if (-not $PSBoundParameters.ContainsKey('StateDirectory')) {
+    $LegacyStateDirectory += @(
+        (Join-Path $env:LOCALAPPDATA 'Searchlight.Build\Dev'),
+        (Join-Path $env:LOCALAPPDATA 'Searchlight.Build\Production'),
+        (Join-Path (Split-Path -Parent $PSScriptRoot) 'src\Searchlight\obj\build-version')
+    )
+}
+
+function Read-Counter([string]$Path) {
+    if (-not [IO.File]::Exists($Path)) { return 0 }
+    $stored = [IO.File]::ReadAllText($Path).Trim()
+    $value = 0
+    if ($stored -notmatch '^[0-9]{1,2}$' -or
+        -not [int]::TryParse($stored, [ref]$value) -or $value -lt 1) {
+        throw "Invalid build counter in '$Path': '$stored'."
+    }
+    return $value
+}
+
 $lockPath = Join-Path $StateDirectory 'counter.lock'
 $counterPath = Join-Path $StateDirectory "$date.txt"
 $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -34,23 +72,20 @@ try {
         }
     }
 
-    $number = 0
-    if ([IO.File]::Exists($counterPath)) {
-        $stored = [IO.File]::ReadAllText($counterPath).Trim()
-        if ($stored -notmatch '^[0-9]{1,2}$' -or
-            -not [int]::TryParse($stored, [ref]$number) -or $number -lt 1) {
-            throw "Invalid build counter in '$counterPath': '$stored'."
-        }
+    $number = Read-Counter $counterPath
+    foreach ($legacy in $LegacyStateDirectory) {
+        $number = [Math]::Max($number, (Read-Counter (Join-Path $legacy "$date.txt")))
     }
-    if ($number -ge 99) {
+    if (-not $reuse -and $number -ge 99) {
         throw "Daily build limit reached for $date. YYYY.MM.DD.## permits builds 01 through 99."
     }
 
-    $number++
+    $result = if ($reuse) { $requestedNumber } else { $number + 1 }
+    $number = [Math]::Max($number, $result)
     $temporaryPath = Join-Path $StateDirectory "$([guid]::NewGuid()).tmp"
     [IO.File]::WriteAllText($temporaryPath, $number.ToString($culture))
     [IO.File]::Move($temporaryPath, $counterPath, $true)
-    "$date.$($number.ToString('D2', $culture))"
+    "$date.$($result.ToString('D2', $culture))"
 }
 finally {
     if ($null -ne $temporaryPath -and [IO.File]::Exists($temporaryPath)) {

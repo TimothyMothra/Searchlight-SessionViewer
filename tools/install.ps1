@@ -25,11 +25,16 @@
     Build configuration to publish. Default: Release. (Do NOT use Demo here —
     that config forces the synthetic mock datastore.)
 
+.PARAMETER BuildName
+    Reuse an allocated YYYY.MM.DD.## release name, for example when building
+    Production and Dev from the same source. Omit to allocate the next shared version.
+
 .PARAMETER NoDesktop
     Skip creating the desktop shortcut.
 
 .PARAMETER NoStartup
-    Skip creating the run-at-login (Startup) shortcut.
+    Skip creating the run-at-login shortcut on first installation.
+    Upgrades always preserve the existing startup choice.
 
 .PARAMETER SkipPublish
     Reuse an existing installed app folder instead of re-publishing (only
@@ -59,6 +64,7 @@ param(
     [string]$Action = 'Install',
 
     [string]$Configuration = 'Release',
+    [string]$BuildName,
 
     [switch]$NoDesktop,
     [switch]$NoStartup,
@@ -67,6 +73,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($BuildName -and $SkipPublish) { throw 'BuildName cannot be combined with SkipPublish.' }
 
 # --- Paths -------------------------------------------------------------------
 $RepoRoot   = Split-Path -Parent $PSScriptRoot
@@ -78,6 +85,9 @@ $ExePath    = Join-Path $InstallDir $ExeName
 $StartMenuLnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Searchlight.lnk'
 $StartupLnk   = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Searchlight.lnk'
 $DesktopLnk   = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Searchlight.lnk'
+# ASSUMPTION: an installed app without a startup shortcut has opted out. Updates
+# must not recreate it; existing shortcuts retain Windows' startup approval state.
+$WasInstalled = Test-Path $ExePath
 
 function Write-Step($msg) { Write-Host "[install] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "  + $msg"        -ForegroundColor Green }
@@ -97,6 +107,7 @@ function New-Shortcut {
     # The exe embeds Assets\app.ico via <ApplicationIcon>, so index 0 is our icon.
     $lnk.IconLocation     = "$Target,0"
     $lnk.Save()
+    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($lnk) | Out-Null
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
 }
 
@@ -240,6 +251,9 @@ Write-Step "Target RID: $rid ($platform)"
 Write-Step "Install to: $InstallDir"
 
 if (-not $SkipPublish) {
+    if ($BuildName) {
+        $BuildName = & (Join-Path $PSScriptRoot 'Get-NextBuildVersion.ps1') -BuildName $BuildName
+    }
     # Ask before the (slow) publish, so the user is not left waiting through a
     # full self-contained build before being prompted to close the app.
     Assert-InstallDirWritable -Path $ExePath -AutoStop:$StopRunning
@@ -249,13 +263,11 @@ if (-not $SkipPublish) {
 
     if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
 
-    dotnet publish $Project `
-        -c $Configuration `
-        -r $rid `
-        -p:Platform=$platform `
-        --self-contained true `
-        -o $publishDir `
-        --nologo
+    $publishArguments = @('publish', $Project, '-c', $Configuration, '-r', $rid,
+        "-p:Platform=$platform", '-p:SearchlightPackaging=None', '-p:SearchlightChannel=Production',
+        '--self-contained', 'true', '-o', $publishDir, '--nologo')
+    if ($BuildName) { $publishArguments += "-p:SearchlightBuildVersion=$BuildName" }
+    dotnet @publishArguments
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)." }
 
     $publishedExe = Join-Path $publishDir $ExeName
@@ -305,16 +317,22 @@ if (-not $NoDesktop) {
     Write-Ok "Desktop    : $DesktopLnk"
 }
 
-if (-not $NoStartup) {
+if (-not $NoStartup -and -not $WasInstalled -and -not (Test-Path $StartupLnk)) {
     New-Shortcut -LinkPath $StartupLnk -Target $ExePath -WorkDir $InstallDir `
         -Description 'Searchlight (run at login)'
     Write-Ok "Startup    : $StartupLnk"
+}
+elseif (Test-Path $StartupLnk) {
+    Write-Ok "Startup choice retained: $StartupLnk"
+}
+else {
+    Write-Ok 'Auto-start remains disabled; enable it in Searchlight Settings when wanted.'
 }
 
 Write-Host ''
 Write-Host 'Searchlight installed.' -ForegroundColor Green
 Write-Host '  Launch now : press the Win key and type "Searchlight"' -ForegroundColor Gray
-if (-not $NoStartup) {
-    Write-Host '  At login   : it will start automatically and sit in the system tray' -ForegroundColor Gray
+if (Test-Path $StartupLnk) {
+    Write-Host '  At login   : Startup shortcut retained; Windows startup settings also apply' -ForegroundColor Gray
 }
 Write-Host '  Uninstall  : pwsh -File tools\install.ps1 -Action Uninstall' -ForegroundColor Gray

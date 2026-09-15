@@ -36,13 +36,21 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
-  <!-- ASSUMPTION: allocate once per real host build, not IDE design-time builds
-       or restore. Keep state outside configuration-specific intermediates. -->
+  <!-- ASSUMPTION: all channels use the same persistent per-user sequence.
+       Explicit names reuse a release and are registered without another allocation. -->
   <Target Name="AllocateSearchlightBuildVersion" BeforeTargets="GetAssemblyVersion"
           Condition="'$(DesignTimeBuild)' != 'true'">
-    <Exec Command="pwsh -NoProfile -NonInteractive -File &quot;$(MSBuildProjectDirectory)\..\..\tools\Get-NextBuildVersion.ps1&quot; -StateDirectory &quot;$(MSBuildProjectDirectory)\obj\build-version&quot;"
+    <PropertyGroup>
+      <_RequestedSearchlightBuildVersion>$(SearchlightBuildVersion)</_RequestedSearchlightBuildVersion>
+    </PropertyGroup>
+    <Exec Command="pwsh -NoProfile -NonInteractive -File &quot;$(MSBuildProjectDirectory)\..\..\tools\Get-NextBuildVersion.ps1&quot;"
           ConsoleToMSBuild="true" StandardOutputImportance="Low"
-          Condition="'$(SearchlightBuildVersion)' == ''">
+          Condition="'$(_RequestedSearchlightBuildVersion)' == ''">
+      <Output TaskParameter="ConsoleOutput" PropertyName="SearchlightBuildVersion" />
+    </Exec>
+    <Exec Command="pwsh -NoProfile -NonInteractive -File &quot;$(MSBuildProjectDirectory)\..\..\tools\Get-NextBuildVersion.ps1&quot; -BuildName &quot;$(_RequestedSearchlightBuildVersion)&quot;"
+          ConsoleToMSBuild="true" StandardOutputImportance="Low"
+          Condition="'$(_RequestedSearchlightBuildVersion)' != ''">
       <Output TaskParameter="ConsoleOutput" PropertyName="SearchlightBuildVersion" />
     </Exec>
     <PropertyGroup>

@@ -81,7 +81,8 @@ After installing:
 
 - **Launch on demand** — press the **Win** key and type `Searchlight`, or use the desktop icon.
 - **At login** — it starts automatically and sits in the system tray (a **Startup** shortcut is
-  created).
+  created on first installation). Production's Settings can turn this off; updates retain
+  your choice. Dev has no auto-start option.
 - **Single instance** — launching again (e.g. clicking the icon while it's already running at
   login) just surfaces the existing window instead of adding a second tray icon.
 

@@ -17,16 +17,18 @@ Key invariants (see docs for detail):
 
 ## Review workflow
 
-- After application changes, validate and build the current worktree's Release **Dev MSIX**
-  with `tools\Build-Msix.ps1`, then install/launch it with `tools\Install-DevMsix.ps1`
-  before handing back for review. Keep Production installed and untouched.
-  Use `tools\install.ps1` only when the user explicitly wants an unpackaged installation.
-  Installation of Dev is authorized by default;
-  do not stop at a build-only handoff unless installation is blocked or the user asks to skip it.
+- After application changes, validate and install before handing back for review, unless
+  blocked or the user asks to skip it. The normal local installation is the auto-starting
+  **Production** copy at `%LOCALAPPDATA%\Searchlight\app`; update it with
+  `tools\install.ps1 -Configuration Release`. Do not substitute a Dev MSIX update when
+  the user asks to update the normal local app.
+- Dev is a separate MSIX installation, built with `tools\Build-Msix.ps1` and managed with
+  `tools\Install-DevMsix.ps1`. Use it when the user specifically wants Dev/MSIX review.
 - Copilot has standing authorization to control the **Dev installation**: build, install,
   launch, close, and restart it without repeated prompts. Prefer the graceful exit handshake;
-  use `Install-DevMsix.ps1 -StopRunning` when necessary. Never extend this authorization to
-  stopping, replacing, or uninstalling Production. Preserve shared settings and notes.
+  use `Install-DevMsix.ps1 -StopRunning` when necessary. Production updates must use its
+  graceful exit handshake and preserve shared settings, notes, and the startup choice.
+  Dev-only permission does not authorize force-stopping or uninstalling Production.
 - Verify the package identity/version and that the installed executable, assembly, and
   `resources.pri` match the MSIX payload (`Searchlight.pri` for unpackaged installs).
   Report installation blockers plainly rather than implying the running app has been updated.

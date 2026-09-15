@@ -22,6 +22,8 @@ namespace Searchlight.Views;
 public sealed partial class MainView : UserControl
 {
     public MainViewModel ViewModel { get; }
+    public StartupSettingsViewModel Startup { get; } = new(new StartupRegistration());
+    public bool ShowStartupSetting => AppIdentity.Channel == "Production";
 
     /// <summary>
     /// The custom title bar drag strip. The host <see cref="MainWindow"/> passes this
@@ -96,10 +98,18 @@ public sealed partial class MainView : UserControl
         SessionList.ItemsSource = groupedSource.View;
     }
 
-    private void OnSettingsClick(object sender, RoutedEventArgs e)
+    private async void OnSettingsClick(object sender, RoutedEventArgs e)
     {
         ViewModel.Settings.Reload();
         ShowApplicationPane(isSettings: true);
+        if (ShowStartupSetting) await Startup.LoadAsync();
+    }
+
+    private async void OnStartupToggled(object sender, RoutedEventArgs e)
+    {
+        if (ShowStartupSetting && !Startup.IsBusy && sender is ToggleSwitch toggle &&
+            toggle.IsOn != Startup.IsEnabled)
+            await Startup.SetEnabledAsync(toggle.IsOn);
     }
 
     private void OnInformationClick(object sender, RoutedEventArgs e) => ShowApplicationPane(isSettings: false);

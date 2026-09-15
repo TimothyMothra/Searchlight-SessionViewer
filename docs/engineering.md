@@ -75,21 +75,26 @@ flag wins hard, the runtime flag is the opt-in for a normal build.
 
 Every real host build embeds a name in **`YYYY.MM.DD.##`** format, for example
 `2026.09.14.01`. The date is the build machine's local Gregorian date, not the launch date.
-`tools\Get-NextBuildVersion.ps1` increments the daily suffix before assembly metadata generation;
-Debug, Release, Demo, and publish builds share this worktree's ignored
-`src\Searchlight\obj\build-version` counters. Restore and IDE design-time builds do not allocate.
+`tools\Get-NextBuildVersion.ps1` increments the daily suffix before assembly metadata generation.
+Production, Dev, unpackaged, Debug, Release, Demo, and publish builds all use the same persistent
+`%LOCALAPPDATA%\Searchlight.Build\Shared` counters, across worktrees for this user on this machine.
+Restore and IDE design-time builds do not allocate.
 The informational version preserves zero padding; assembly/file versions carry the same numeric
 components. Information displays the embedded name without a Git SHA suffix.
 
 Numbers start at **01** on each new day. Allocation is locked across concurrent processes and
 counter replacement is atomic. Failed builds can consume a number. To preserve the exact two-digit
-format, build 100 fails explicitly rather than wrapping or reusing a number. Counters are local,
-not a globally coordinated release sequence: a new worktree or deleting its counter directory
-starts again at 01. Keep that directory to retain same-day numbering.
+format, build 100 fails explicitly rather than wrapping or reusing a number. A new worktree does
+not reset the sequence. Keep the shared directory; it is not a distributed allocator across machines.
+Existing Dev/Production counter folders and the calling worktree's legacy `obj\build-version`
+are read as high-water marks, so switching to the shared allocator never starts below them.
+Old counter files are left intact; older checkout tooling must be updated to join this sequence.
 
-MSIX builds instead accept an allocated build name. Automatic Dev allocation is shared across
-worktrees under `%LOCALAPPDATA%\Searchlight.Build\Dev`; Production requires an explicit release
-name. Package versions and additional-architecture builds follow the [MSIX version contract](msix.md#versions).
+To produce the same release for Production, Dev, and multiple architectures, allocate once and
+pass `-BuildName` to `tools\install.ps1` and `tools\Build-Msix.ps1`. Explicit names are registered
+without consuming another number and never lower the shared high-water mark. Reuse a name only for
+the same source release, not to label newer code with an older version.
+Package versions follow the [MSIX version contract](msix.md#versions).
 
 Run `pwsh -NoProfile -File tools\Test-BuildVersion.ps1` for isolated checks of incrementing,
 date rollover, culture-independent formatting, exhaustion, corrupt state, and concurrent allocation.
@@ -214,6 +219,14 @@ Microsoft.NET.Test.Sdk 17.11.1 · xunit 2.9.2 · xunit.runner.visualstudio 2.8.2
 ## 7. Settings, resume & elevation behavior
 
 ### Settings (`AppSettings`)
+
+Production also exposes **Start Searchlight when I sign in**, backed directly by Windows,
+not the shared JSON settings. The installed unpackaged Production app manages its Startup
+shortcut; packaged Production uses `StartupTask`. Windows-disabled or policy-controlled
+entries are not overridden. Upgrades preserve the existing startup choice.
+Dev has neither this control nor a startup-task declaration.
+`pwsh -File tools\Test-InstallStartup.ps1` verifies upgrade preservation using
+temporary redirected installer paths, without changing actual Windows startup entries.
 
 Persisted as JSON at `%USERPROFILE%\.searchlight\settings.json`, shared by the channels
 and auto-saved on any property
