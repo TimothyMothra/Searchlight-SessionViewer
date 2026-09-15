@@ -10,7 +10,8 @@ namespace Searchlight.Services;
 /// Reads at most <see cref="MaxLines"/> leading lines and <see cref="MaxInputBytes"/>
 /// bytes without materializing the log. Extracts the <c>session.start</c> baseline, tracks the
 /// latest <c>session.model_change</c> seen in-window, and captures the first
-/// <c>user.message</c> content as a prompt preview. Read-only and null-safe.
+/// <c>user.message</c> content as a prompt preview. A separate bounded reverse scan
+/// captures the last prompt. Read-only and null-safe.
 /// </summary>
 public sealed class EventsJsonlReader
 {
@@ -46,7 +47,8 @@ public sealed class EventsJsonlReader
             using var stream = new FileStream(
                 path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
                 bufferSize: 1, FileOptions.SequentialScan);
-            return Read(stream);
+            SessionStartInfo? start = Read(stream);
+            return start is null ? null : start with { LastUserPrompt = ReadLastPrompt(stream) };
         }
         catch (IOException)
         {
@@ -110,7 +112,7 @@ public sealed class EventsJsonlReader
                             break;
 
                         case "user.message" when firstPrompt is null:
-                            firstPrompt = ExtractFirstPrompt(root);
+                            firstPrompt = ExtractPromptPreview(root);
                             break;
                     }
                 }
@@ -250,9 +252,116 @@ public sealed class EventsJsonlReader
         reasoningEffort = GetString(data, "reasoningEffort") ?? reasoningEffort;
     }
 
-    private static string? ExtractFirstPrompt(JsonElement root)
+    // ASSUMPTION: "last" means the latest complete, nonempty user.message in file order,
+    // not an assistant/tool response. Snapshot EOF so a live writer cannot extend the scan.
+    // Never fall back to the head's last message: it may be arbitrarily stale.
+    internal string? ReadLastPrompt(Stream stream)
+    {
+        byte[] input = ArrayPool<byte>.Shared.Rent(ReadBufferSize);
+        byte[] line = ArrayPool<byte>.Shared.Rent(MaxEventLineBytes);
+        try
+        {
+            long position = stream.Length;
+            int total = 0, count = 0, length = 0;
+            bool skipCr = false;
+            while (position > 0 && total < MaxInputBytes && count < MaxLines)
+            {
+                int size = (int)Math.Min(position, Math.Min(ReadBufferSize, MaxInputBytes - total));
+                position -= size;
+                stream.Seek(position, SeekOrigin.Begin);
+                int read = 0;
+                while (read < size)
+                {
+                    int next = stream.Read(input, read, size - read);
+                    if (next == 0)
+                        throw new IOException("Event log changed during the last-prompt scan.");
+                    read += next;
+                }
+                total += read;
+
+                for (int i = read - 1; i >= 0; i--)
+                {
+                    byte value = input[i];
+                    if (skipCr)
+                    {
+                        skipCr = false;
+                        if (value == (byte)'\r') continue;
+                    }
+                    if (value is (byte)'\n' or (byte)'\r')
+                    {
+                        skipCr = value == (byte)'\n';
+                        // A trailing newline terminates the final event; it is not another line.
+                        if (total == read && i == read - 1) continue;
+                        string? prompt = ParsePromptLine(line.AsMemory(MaxEventLineBytes - length, length));
+                        if (prompt is not null) return prompt;
+                        length = 0;
+                        if (++count >= MaxLines)
+                        {
+                            CoreLog.Write($"EventsJsonlReader: last-prompt line limit reached ({MaxLines} lines).");
+                            return null;
+                        }
+                    }
+                    else
+                    {
+                        if (length == MaxEventLineBytes)
+                        {
+                            // An oversized event might itself be the last prompt. Do not show
+                            // an older prompt as "last" when this event cannot be inspected.
+                            CoreLog.Write($"EventsJsonlReader: last prompt unavailable; event exceeds {MaxEventLineBytes} bytes.");
+                            return null;
+                        }
+                        line[MaxEventLineBytes - ++length] = value;
+                    }
+                }
+            }
+
+            if (position == 0)
+                return ParsePromptLine(line.AsMemory(MaxEventLineBytes - length, length));
+
+            CoreLog.Write($"EventsJsonlReader: last-prompt input limit reached ({MaxInputBytes} bytes).");
+            return null;
+        }
+        catch (IOException ex)
+        {
+            CoreLog.Write($"EventsJsonlReader: last-prompt read failed: {ex.Message}");
+            return null;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            CoreLog.Write($"EventsJsonlReader: last-prompt access failed: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(input);
+            ArrayPool<byte>.Shared.Return(line);
+        }
+    }
+
+    private static string? ParsePromptLine(ReadOnlyMemory<byte> line)
+    {
+        if (line.Span.StartsWith("\uFEFF"u8)) line = line[3..];
+        if (line.IsEmpty) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            JsonElement root = doc.RootElement;
+            return root.ValueKind == JsonValueKind.Object &&
+                GetString(root, "type") == "user.message"
+                ? ExtractPromptPreview(root)
+                : null;
+        }
+        catch (JsonException)
+        {
+            // A live log can end with a partially written event.
+            return null;
+        }
+    }
+
+    private static string? ExtractPromptPreview(JsonElement root)
     {
         if (!root.TryGetProperty("data", out JsonElement data) ||
+            data.ValueKind != JsonValueKind.Object ||
             !data.TryGetProperty("content", out JsonElement content) ||
             content.ValueKind != JsonValueKind.String)
         {

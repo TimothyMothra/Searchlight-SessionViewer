@@ -29,9 +29,9 @@ public sealed record SessionInfo
     /// <summary>Parsed <c>workspace.yaml</c>, or null when absent.</summary>
     public WorkspaceMetadata? Workspace { get; init; }
 
-    // --- events.jsonl head ---
+    // --- events.jsonl previews ---
 
-    /// <summary>Parsed head of <c>events.jsonl</c>, or null when absent.</summary>
+    /// <summary>Parsed head metadata and tail prompt of <c>events.jsonl</c>, or null when absent.</summary>
     public SessionStartInfo? Start { get; init; }
 
     // --- enrichment (best-effort) ---
@@ -151,6 +151,9 @@ public sealed record SessionInfo
 
     /// <summary>First user prompt preview, from the events head.</summary>
     public string? FirstPromptPreview => Start?.FirstUserPrompt;
+
+    /// <summary>Last user prompt preview, from the events tail.</summary>
+    public string? LastPromptPreview => Start?.LastUserPrompt;
 
     /// <summary>
     /// Effective updated time — workspace <c>updated_at</c> if known, else the

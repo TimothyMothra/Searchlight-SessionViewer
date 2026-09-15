@@ -30,6 +30,19 @@ public sealed class MockSessionDataSourceTests
         Assert.Equal(15, _sut.LoadAll().Count);
 
     [Fact]
+    public void PromptPreviews_CoverSingleAndMultipleTurnSessions()
+    {
+        Assert.All(_sut.LoadAll(), session =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(session.LastPromptPreview));
+            if (session.HasCheckpoints)
+                Assert.NotEqual(session.FirstPromptPreview, session.LastPromptPreview);
+            else
+                Assert.Equal(session.FirstPromptPreview, session.LastPromptPreview);
+        });
+    }
+
+    [Fact]
     public void LoadAll_ReturnsExactlySixDetailedSessions()
     {
         int detailed = _sut.LoadAll().Count(s => s.HasCheckpoints);

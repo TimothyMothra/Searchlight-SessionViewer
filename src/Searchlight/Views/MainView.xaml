@@ -681,6 +681,7 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Folder" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -704,8 +705,11 @@
                                     <TextBlock Grid.Row="6" Grid.Column="0" Text="First prompt" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Grid.Row="6" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.FirstPromptPreview, Mode=OneWay, Converter={StaticResource StringOrDash}}" TextWrapping="Wrap" MaxLines="24" TextTrimming="CharacterEllipsis" />
 
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Client" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="7" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.ClientNameRaw, Mode=OneWay}" />
+                                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Last prompt" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Row="7" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.LastPromptPreview, Mode=OneWay, Converter={StaticResource StringOrDash}}" TextWrapping="Wrap" MaxLines="24" TextTrimming="CharacterEllipsis" />
+
+                                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Client" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Row="8" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.ClientNameRaw, Mode=OneWay}" />
                                 </Grid>
                             </StackPanel>
                         </Border>

@@ -228,6 +228,12 @@ public sealed class EventsJsonlReaderTests(ITestOutputHelper output)
             writer.Write(Encoding.UTF8.GetBytes(Start + "\n" + Prompt("live") + "\n{"));
             writer.Flush();
             Assert.Equal("live", reader.Read(folder)!.FirstUserPrompt);
+            Assert.Equal("live", reader.Read(folder)!.LastUserPrompt);
+            writer.Write(Encoding.UTF8.GetBytes("}\n" + Prompt("follow-up") + "\n"));
+            writer.Flush();
+            var updated = reader.Read(folder)!;
+            Assert.Equal("live", updated.FirstUserPrompt);
+            Assert.Equal("follow-up", updated.LastUserPrompt);
         }
         finally
         {
@@ -260,15 +266,135 @@ public sealed class EventsJsonlReaderTests(ITestOutputHelper output)
         return new EventsJsonlReader().Read(stream);
     }
 
+    [Theory]
+    [InlineData("\n", 1)]
+    [InlineData("\r\n", 7)]
+    [InlineData("\r", 16384)]
+    public void ReadLastPrompt_FindsLatestCompleteNonemptyUserMessage(string newline, int chunkSize)
+    {
+        string text = "\uFEFF" + Start + newline + Prompt("first") + newline +
+            Prompt("  latest\r\nh\u00e9llo \ud83c\udf0d  ") + newline +
+            Prompt(" \t ") + newline +
+            """{"type":"assistant.message","data":{"content":"not a prompt"}}""" + newline +
+            """{"type":"user.message","data":null}""" + newline +
+            """{"type":"user.message","data":{"content":false}}""" + newline +
+            """{"type":"user.message","data":{"content":"incomplete""";
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes(text), chunkSize);
+        Assert.Equal("latest  h\u00e9llo \ud83c\udf0d", new EventsJsonlReader().ReadLastPrompt(stream));
+        Assert.True(stream.CanRead);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    [InlineData("\r")]
+    public void ReadLastPrompt_HandlesSinglePromptWithOrWithoutFinalNewline(string newline)
+    {
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes("\uFEFF" + Prompt("only") + newline));
+        Assert.Equal("only", new EventsJsonlReader().ReadLastPrompt(stream));
+    }
+
+    [Theory]
+    [InlineData(1999)]
+    [InlineData(2000)]
+    [InlineData(2001)]
+    public void ReadLastPrompt_UsesTheSamePreviewLengthAsFirstPrompt(int length)
+    {
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes(Start + "\n" + Prompt(new string('x', length))));
+        Assert.Equal(new string('x', Math.Min(length, 2000)) + (length > 2000 ? "\u2026" : ""),
+            new EventsJsonlReader().ReadLastPrompt(stream));
+    }
+
+    [Fact]
+    public void ReadLastPrompt_FindsPromptBeyondBothHeadBudgets()
+    {
+        string text = Start + "\n" + Prompt("first") + "\n" +
+            new string('x', EventsJsonlReader.MaxInputBytes) + "\n" +
+            new string('\n', EventsJsonlReader.MaxLines) + Prompt("latest") + "\n";
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes(text));
+        Assert.Equal("latest", new EventsJsonlReader().ReadLastPrompt(stream));
+        Assert.True(stream.BytesRead <= 16384);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void ReadLastPrompt_DoesNotMislabelOlderPromptWhenLatestEventIsOversized(int excess)
+    {
+        string text = Prompt("older") + "\n" +
+            PadEvent(Prompt("latest"), EventsJsonlReader.MaxEventLineBytes + excess) + "\n";
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes(text));
+        Assert.Equal(excess > 0 ? null : "latest", new EventsJsonlReader().ReadLastPrompt(stream));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ReadLastPrompt_RespectsTailBudgetsWithoutFallingBackToOlderPrompt(bool byteBudget)
+    {
+        string filler = byteBudget
+            ? string.Concat(Enumerable.Repeat(new string(' ', 16383) + "\n", 512))
+            : new string('\n', EventsJsonlReader.MaxLines + 1);
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes(Prompt("older") + "\n" + filler));
+        Assert.Null(new EventsJsonlReader().ReadLastPrompt(stream));
+        Assert.True(stream.BytesRead <= EventsJsonlReader.MaxInputBytes);
+        if (byteBudget) Assert.Equal(EventsJsonlReader.MaxInputBytes, stream.BytesRead);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(Start)]
+    [InlineData("null\n[]\n1\n\"text\"\n{}\n{\"type\":42}\n{")]
+    public void ReadLastPrompt_ReturnsNullWithoutPrompt(string text)
+    {
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes(text));
+        Assert.Null(new EventsJsonlReader().ReadLastPrompt(stream));
+    }
+
+    [Theory]
+    [InlineData(16382)]
+    [InlineData(16383)]
+    [InlineData(16384)]
+    public void ReadLastPrompt_HandlesEventsAndCrLfAcrossReverseBufferBoundaries(int padding)
+    {
+        string text = Start + "\r\n" + Prompt("latest \u00e9 \ud83c\udf0d") + "\r\n" +
+            new string(' ', padding) + "\r\n";
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes(text), chunkSize: 7);
+        Assert.Equal("latest \u00e9 \ud83c\udf0d", new EventsJsonlReader().ReadLastPrompt(stream));
+    }
+
+    [Fact]
+    public void ReadLastPrompt_LogsIoFailureWithoutReturningAnOlderPrompt()
+    {
+        using var stream = new RecordingStream(Encoding.UTF8.GetBytes(Prompt("older")), failOnSeek: true);
+        var messages = new List<string>();
+        var previous = CoreLog.Sink;
+        try
+        {
+            CoreLog.Sink = messages.Add;
+            Assert.Null(new EventsJsonlReader().ReadLastPrompt(stream));
+        }
+        finally
+        {
+            CoreLog.Sink = previous;
+        }
+        Assert.Contains(messages, message => message.Contains("last-prompt read failed"));
+    }
+
     private static string Prompt(string text) =>
         "{\"type\":\"user.message\",\"data\":{\"content\":" +
         JsonSerializer.Serialize(text, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) + "}}";
 
     private static string PadEvent(string json, int bytes) => json + new string(' ', bytes - json.Length);
 
-    private sealed class RecordingStream(byte[] bytes, int chunkSize = int.MaxValue, bool failAtEnd = false) : MemoryStream(bytes)
+    private sealed class RecordingStream(byte[] bytes, int chunkSize = int.MaxValue, bool failAtEnd = false, bool failOnSeek = false) : MemoryStream(bytes)
     {
         public int BytesRead { get; private set; }
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            failOnSeek ? throw new IOException("Synthetic seek failure.") : base.Seek(offset, origin);
 
         public override int Read(byte[] buffer, int offset, int count)
         {

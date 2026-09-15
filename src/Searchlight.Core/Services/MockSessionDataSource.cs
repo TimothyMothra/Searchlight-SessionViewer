@@ -200,6 +200,8 @@ public sealed class MockSessionDataSource : ISessionDataSource
             StartTime = updated.AddMinutes(-30),
             Cwd = @"C:\REPOS\DemoApp",
             FirstUserPrompt = prompt,
+            // ASSUMPTION: detailed fixtures have follow-up turns; plain fixtures have one turn.
+            LastUserPrompt = withDetail ? $"Summarize the changes for {title.ToLowerInvariant()} and any remaining work." : prompt,
         };
 
         var session = new SessionInfo

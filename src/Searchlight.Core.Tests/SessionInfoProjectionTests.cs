@@ -12,6 +12,19 @@ public sealed class SessionInfoProjectionTests
 {
     private const string SampleId = "12345678-0000-4000-8000-000000000042";
 
+    [Fact]
+    public void PromptPreviews_ProjectIndependentFirstAndLastMessages()
+    {
+        Assert.Null(Session().FirstPromptPreview);
+        Assert.Null(Session().LastPromptPreview);
+        var session = Session() with
+        {
+            Start = new SessionStartInfo { FirstUserPrompt = "first", LastUserPrompt = "last" },
+        };
+        Assert.Equal("first", session.FirstPromptPreview);
+        Assert.Equal("last", session.LastPromptPreview);
+    }
+
     private static SessionInfo Session(
         string? name = null,
         string? clientName = null,

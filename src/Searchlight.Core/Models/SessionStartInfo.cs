@@ -3,9 +3,8 @@ namespace Searchlight.Models;
 /// <summary>
 /// Lightweight projection of the head of a session's <c>events.jsonl</c> stream:
 /// the <c>session.start</c> event, the most recent <c>session.model_change</c>,
-/// and the first <c>user.message</c> content (for a prompt preview).
-/// Only a bounded number of leading lines are read; the full ~300 KB log is
-/// never materialized.
+/// and the first <c>user.message</c> content (for a prompt preview), plus the
+/// last prompt from a separate bounded tail scan. The full log is never materialized.
 /// </summary>
 public sealed record SessionStartInfo
 {
@@ -39,4 +38,7 @@ public sealed record SessionStartInfo
 
     /// <summary>First user message content, trimmed for a one-line preview.</summary>
     public string? FirstUserPrompt { get; init; }
+
+    /// <summary>Latest complete nonempty user message preview, or null if unavailable.</summary>
+    public string? LastUserPrompt { get; init; }
 }

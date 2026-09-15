@@ -16,7 +16,7 @@ states so an unavailable source cannot look like an empty todo table.
 |-----------------------------|--------|----------------|------|
 | `session-state/<id>/` folders | `SessionStateScanner` | One base `SessionInfo` per folder: `Id`, `FolderName`, `FolderPath`, `Kind`, `LastWriteTime`, presence flags (`IsInUse` via `inuse.<PID>.lock`, `HasPlan`, `HasSessionDb`, `HasCheckpoints`, `HasEvents`) and `IsEnriched`. Splits `optimistic-chat-` prefix → `Chat`, else `Project`. | cheap (bulk) |
 | `session-state/<id>/workspace.yaml` | `WorkspaceYamlReader` | `WorkspaceMetadata` (name, cwd, `client_name`, created/updated, user-named, summary count, MC ids) via YamlDotNet. | cheap (bulk) |
-| `session-state/<id>/events.jsonl` | `EventsJsonlReader` | `SessionStartInfo` — UTF-8 preview bounded by 2,000 lines and 8 MiB input, with individual events over 1 MiB skipped: `session.start` baseline + latest in-window `session.model_change` + first in-window `user.message` preview. Documents are disposed without cloning; the complete log is never materialized. Limit hits are logged. | heavy (lazy, cached) |
+| `session-state/<id>/events.jsonl` | `EventsJsonlReader` | `SessionStartInfo` — UTF-8 head preview bounded by 2,000 lines and 8 MiB input, with individual events over 1 MiB skipped: `session.start` baseline + latest in-window `session.model_change` + first in-window `user.message` preview. A separate reverse scan finds the last prompt with the same per-scan limits. Documents are disposed without cloning; the complete log is never materialized. Limit hits are logged. | heavy (lazy, cached) |
 | `status-snapshots/index.db` (table `snapshots`) | `SnapshotIndexReader` | Branch + snapshot count per session (bulk index scan); `SnapshotInfo` rows on demand. Read-only SQLite. | cheap bulk / heavy detail |
 | `journal/<YYYY-MM>.md` | `JournalReader` | `JournalEntry` rows from the pipe table `\| time \| session_id \| branch \| cwd \| activity \|`; last row wins per session → `JournalActivity`. | cheap (bulk) |
 | `session-state/<id>/checkpoints/NNN-title.md` + `index.md` | `CheckpointsReader` | `CheckpointInfo` list; prefers the fuller title from `index.md`'s table over the truncated file name. | heavy (lazy) |
@@ -34,6 +34,16 @@ accumulating details for every visited session. File length/last-write time and 
 versions are used for invalidation; unchanged filtering does not even recheck these files.
 The Details tab does not read `session.db`. See
 [architecture.md](./architecture.md) for refresh, cancellation and cache assumptions.
+
+**Prompt previews.** Details shows **First prompt** followed by **Last prompt**. Both use
+nonempty `user.message.data.content` strings, flatten line breaks, and truncate after 2,000
+characters with an ellipsis (the UI also caps each preview at 24 lines). Last prompt reads
+backward from a captured EOF, independent of the head window; assistant/tool events and
+malformed or incomplete JSON are ignored. A single-message session shows the same prompt twice.
+Missing prompts display a dash. If the reverse scan hits its byte/line budget or an oversized
+event before finding a prompt, it logs the limit and leaves Last prompt unavailable rather than
+mislabeling an older prompt as the last one. Existing selection/refresh invalidation rereads
+changed logs; this does not add polling or catalog-wide event reads.
 
 ### Agent tasks tab contract
 
@@ -102,6 +112,7 @@ stored fields it exposes computed **projections**:
 | `ClientLabel` / `IsCliClient` / `IsAppClient` / `ClientNameRaw` | From `workspace.yaml` `client_name` (see §2). |
 | `Cwd` | Workspace `Cwd`, falling back to the start-event `Cwd`. |
 | `Model` / `ReasoningEffort` / `CopilotVersion` / `FirstPromptPreview` | From the `events.jsonl` head (`Start`). |
+| `LastPromptPreview` | From the bounded `events.jsonl` tail scan (`Start.LastUserPrompt`). |
 | `UpdatedAt` | Workspace `updated_at` if known, else folder `LastWriteTime`. |
 | `SnapshotCount` / `Branch` / `JournalActivity` | Best-effort enrichment. |
 
@@ -111,7 +122,7 @@ stored fields it exposes computed **projections**:
 |------|-------|--------|
 | `SessionKind` (enum) | `Project` \| `Chat` | folder-name prefix |
 | `WorkspaceMetadata` | id, cwd, client_name, name, user-named, summary count, created/updated, remote-steerable, MC ids | `workspace.yaml` |
-| `SessionStartInfo` | copilot version, context tier, producer, start time, cwd, already-in-use, effective model + reasoning effort, first user prompt | `events.jsonl` head |
+| `SessionStartInfo` | copilot version, context tier, producer, start time, cwd, already-in-use, effective model + reasoning effort, first and last user prompts | `events.jsonl` head + bounded tail |
 | `CheckpointInfo` | number, title, file path, timestamp | `checkpoints/` |
 | `SnapshotInfo` | snapshot id, session id, timestamp (raw + parsed), cwd, branch, file path, `SourceTrigger` (`ask_user`/`handoff`/`task_complete`/`long_turn`/`on_demand`/`checkpoint`) | `status-snapshots/index.db` |
 | `SessionTodo` | id, title, description, raw status, created_at and updated_at as stored strings | `session.db` |

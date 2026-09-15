@@ -177,10 +177,13 @@ manually (double-dispose). See `App.ExitApplication`.
   scroller keeps headers aligned without unbounding vertical layout. Counts include completed,
   unfamiliar, and missing statuses. Compact native tabs retain the selected accent underline.
   Notes remain in their separate pane.
-- **Event previews** are UTF-8, bounded to 2,000 lines / 8 MiB input / 1 MiB per event.
+- **Event previews** are UTF-8, bounded to 2,000 lines / 8 MiB input / 1 MiB per event per scan.
   Oversized events are skipped through the next line boundary; budget hits are logged. The parser
   uses pooled buffers and disposes each JSON document without cloning it. These limits bound a
   preview, not a complete transcript or a claim about the model after the scanned window.
+  A separate reverse scan finds the last complete nonempty user prompt from a captured EOF
+  without relying on the head window. It stops at the same limits or an oversized event,
+  logging an unavailable preview rather than presenting a potentially stale earlier prompt.
 - **Diagnostics** distinguish first publication from full summary completion. The footer's
   `Loaded N sessions in Xs` covers all summary batches, not just first display or detail completion.
   Per-phase timings separate catalog/eager/background reader work, UI mutations, and scheduling
