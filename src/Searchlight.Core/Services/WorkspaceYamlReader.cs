@@ -48,6 +48,10 @@ public sealed class WorkspaceYamlReader
             {
                 Id = dto.Id,
                 Cwd = dto.Cwd,
+                GitRoot = dto.GitRoot,
+                Repository = dto.Repository,
+                HostType = dto.HostType,
+                Branch = dto.Branch,
                 ClientName = dto.ClientName,
                 Name = dto.Name,
                 UserNamed = dto.UserNamed,
@@ -74,13 +78,18 @@ public sealed class WorkspaceYamlReader
     {
         public string? Id { get; set; }
         public string? Cwd { get; set; }
+        public string? GitRoot { get; set; }
+        public string? Repository { get; set; }
+        public string? HostType { get; set; }
+        public string? Branch { get; set; }
         public string? ClientName { get; set; }
         public string? Name { get; set; }
-        public bool UserNamed { get; set; }
-        public int SummaryCount { get; set; }
+        // ASSUMPTION: omitted optional fields mean unknown, not false or zero.
+        public bool? UserNamed { get; set; }
+        public long? SummaryCount { get; set; }
         public string? CreatedAt { get; set; }
         public string? UpdatedAt { get; set; }
-        public bool RemoteSteerable { get; set; }
+        public bool? RemoteSteerable { get; set; }
         public string? McTaskId { get; set; }
         public string? McSessionId { get; set; }
     }

@@ -3,8 +3,7 @@ namespace Searchlight.Models;
 /// <summary>
 /// Aggregate view of a single Copilot session, keyed by its UUID and merged
 /// from every available source: the session-state folder, <c>workspace.yaml</c>,
-/// the head of <c>events.jsonl</c>, the status-snapshot index, and the monthly
-/// journal. Every enrichment field is null-safe — sessions vary wildly in which
+/// and bounded previews of <c>events.jsonl</c>. Every enrichment field is null-safe — sessions vary wildly in which
 /// files exist (some <c>optimistic-chat-*</c> folders are empty).
 /// </summary>
 public sealed record SessionInfo
@@ -34,16 +33,8 @@ public sealed record SessionInfo
     /// <summary>Parsed head metadata and tail prompt of <c>events.jsonl</c>, or null when absent.</summary>
     public SessionStartInfo? Start { get; init; }
 
-    // --- enrichment (best-effort) ---
-
-    /// <summary>Most recent branch seen for this session, if any.</summary>
-    public string? Branch { get; init; }
-
-    /// <summary>Latest journal activity synopsis for this session, if any.</summary>
-    public string? JournalActivity { get; init; }
-
-    /// <summary>Number of status snapshots recorded for this session.</summary>
-    public int SnapshotCount { get; init; }
+    /// <summary>Native workspace branch, falling back to the event's recorded start context.</summary>
+    public string? Branch => Workspace?.Branch ?? Start?.Branch;
 
     // --- file-presence flags / state ---
 

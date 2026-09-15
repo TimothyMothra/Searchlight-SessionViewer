@@ -36,7 +36,5 @@ internal sealed class StubSessionDataSource : ISessionDataSource
 
     public IReadOnlyList<CheckpointInfo> ReadCheckpoints(SessionInfo session) => [];
 
-    public IReadOnlyList<SnapshotInfo> LoadSnapshots(string sessionId) => [];
-
     public SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default) => new();
 }

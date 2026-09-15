@@ -8,6 +8,7 @@
     xmlns:conv="using:Searchlight.Converters"
     xmlns:controls="using:Searchlight.Controls"
     xmlns:models="using:Searchlight.Models"
+    xmlns:viewmodels="using:Searchlight.ViewModels"
     mc:Ignorable="d">
 
     <UserControl.Resources>
@@ -247,7 +248,7 @@
                     <TextBlock Text="Getting started" Margin="0,16,0,0"
                                Style="{StaticResource SubtitleTextBlockStyle}"
                                AutomationProperties.HeadingLevel="Level2" />
-                    <TextBlock Text="Search by session name, ID, folder, branch, or prompt. Select a session to see its details, checkpoints, and status snapshots."
+                    <TextBlock Text="Search by session name, ID, folder, branch, or prompt. Select a session to see its native Copilot metadata, agent tasks, and checkpoints."
                                TextWrapping="Wrap" />
                     <TextBlock Text="Open the Agent tasks tab to read a fresh snapshot of that session's tasks. Use its Refresh button to update the snapshot."
                                TextWrapping="Wrap" />
@@ -504,7 +505,7 @@
                     <TextBlock Text="Select a session"
                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                HorizontalAlignment="Center" />
-                    <TextBlock Text="Details, checkpoints, snapshots, and agent tasks appear here."
+                    <TextBlock Text="Native Copilot details, agent tasks, and checkpoints appear here."
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                HorizontalAlignment="Center" TextAlignment="Center" />
                 </StackPanel>
@@ -517,29 +518,12 @@
                     </Grid.RowDefinitions>
 
                     <!-- Pinned title + Resume (stays visible while body scrolls) -->
-                    <Grid Grid.Row="0" ColumnSpacing="12" Padding="20,16,20,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Spacing="2">
+                    <Border Grid.Row="0" Padding="20,16,20,8">
+                    <controls:SessionHeaderPanel>
+                        <StackPanel Spacing="2">
                             <TextBlock Text="{x:Bind ViewModel.Details.Session.DisplayName, Mode=OneWay}"
                                        Style="{StaticResource TitleTextBlockStyle}"
-                                       TextTrimming="CharacterEllipsis" MaxLines="2" />
-                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind ViewModel.Details.Session.Id, Mode=OneWay}"
-                                           FontFamily="Consolas" FontSize="12"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           IsTextSelectionEnabled="True"
-                                           VerticalAlignment="Center" />
-                                <Button Command="{x:Bind ViewModel.Details.CopyIdCommand}"
-                                        Padding="4" MinWidth="0"
-                                        Background="Transparent" BorderThickness="0"
-                                        VerticalAlignment="Center"
-                                        ToolTipService.ToolTip="Copy session ID">
-                                    <FontIcon Glyph="&#xE8C8;" FontSize="12" />
-                                </Button>
-                            </StackPanel>
+                                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxLines="1" />
                             <!-- Note-presence badge: text label (not icon-only) so it reads
                                  clearly. Shown when the selected session has a saved note. -->
                             <Border Background="Transparent" BorderThickness="1"
@@ -553,7 +537,7 @@
                                 </StackPanel>
                             </Border>
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                        <StackPanel Orientation="Horizontal" Spacing="8"
                                     VerticalAlignment="Top">
                                         <!-- Notes toggle: shows/hides the optional Notes pane. Text
                                              label (not icon-only) per the accessibility-first rule;
@@ -627,7 +611,8 @@
                                 </StackPanel>
                             </Button>
                         </StackPanel>
-                    </Grid>
+                    </controls:SessionHeaderPanel>
+                    </Border>
 
                     <TabView Grid.Row="1" Margin="20,0,20,16"
                              SelectedIndex="{x:Bind ViewModel.Details.SelectedTabIndex, Mode=TwoWay}"
@@ -662,100 +647,56 @@
                             <TextBlock Text="Loading session details..."
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        Visibility="{x:Bind ViewModel.Details.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
-                        <!-- Fields -->
-                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1" CornerRadius="8" Padding="16">
-                            <StackPanel Spacing="10">
-                                <Grid ColumnSpacing="16" RowSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="120" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Folder" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.Cwd, Mode=OneWay, Converter={StaticResource StringOrDash}}" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Branch" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.Branch, Mode=OneWay, Converter={StaticResource StringOrDash}}" />
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Model" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.Model, Mode=OneWay, Converter={StaticResource StringOrDash}}" />
-
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Reasoning" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.ReasoningEffort, Mode=OneWay, Converter={StaticResource StringOrDash}}" />
-
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Version" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.CopilotVersion, Mode=OneWay, Converter={StaticResource StringOrDash}}" />
-
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Updated" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="5" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.UpdatedAt, Mode=OneWay, Converter={StaticResource FriendlyDate}}" />
-
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Text="First prompt" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Row="6" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.FirstPromptPreview, Mode=OneWay, Converter={StaticResource StringOrDash}}" TextWrapping="Wrap" MaxLines="24" TextTrimming="CharacterEllipsis" />
-
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Last prompt" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="7" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.LastPromptPreview, Mode=OneWay, Converter={StaticResource StringOrDash}}" TextWrapping="Wrap" MaxLines="24" TextTrimming="CharacterEllipsis" />
-
-                                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Client" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Grid.Row="8" Grid.Column="1" Text="{x:Bind ViewModel.Details.Session.ClientNameRaw, Mode=OneWay}" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Checkpoints -->
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="Checkpoints" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <ItemsControl ItemsSource="{x:Bind ViewModel.Details.Checkpoints}">
+                            <TextBlock Text="{x:Bind ViewModel.Details.SectionLoadError, Mode=OneWay}"
+                                       TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
+                                       Visibility="{x:Bind ViewModel.Details.SectionLoadError, Mode=OneWay, Converter={StaticResource StringToVis}}" />
+                            <TextBlock Text="Native Copilot metadata only. Missing values are shown as a dash; timestamps use local time with UTC offset."
+                                       TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.Details.MetadataGroups, Mode=OneWay}">
                                 <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="models:CheckpointInfo">
-                                        <Grid ColumnSpacing="10" Padding="0,4">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="4" Padding="6,2" VerticalAlignment="Top">
-                                                <TextBlock Text="{x:Bind Number}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            </Border>
-                                            <TextBlock Grid.Column="1" Text="{x:Bind Title, Converter={StaticResource StringOrDash}}" TextWrapping="Wrap" />
-                                        </Grid>
+                                    <DataTemplate x:DataType="viewmodels:SessionMetadataGroup">
+                                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                                            <StackPanel Spacing="10">
+                                                <TextBlock Text="{x:Bind Title}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                                <TextBlock Text="{x:Bind Source}" TextWrapping="Wrap" FontSize="12"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <ItemsControl ItemsSource="{x:Bind Fields}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="viewmodels:SessionMetadataField">
+                                                            <Grid ColumnSpacing="16" Padding="0,5">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="180" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{x:Bind Label}" TextWrapping="Wrap"
+                                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                                <Grid Grid.Column="1" ColumnSpacing="4" HorizontalAlignment="Left">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Text="{x:Bind Value}" TextWrapping="Wrap"
+                                                                               IsTextSelectionEnabled="True" MaxLines="24" TextTrimming="CharacterEllipsis" />
+                                                                    <Button Grid.Column="1" Command="{x:Bind CopyCommand}"
+                                                                            Visibility="{x:Bind CanCopy, Converter={StaticResource BoolToVis}}"
+                                                                            Padding="4" MinWidth="0" VerticalAlignment="Top"
+                                                                            Background="Transparent" BorderThickness="0"
+                                                                            AutomationProperties.Name="Copy session ID"
+                                                                            ToolTipService.ToolTip="Copy session ID">
+                                                                        <FontIcon Glyph="&#xE8C8;" FontSize="12" />
+                                                                    </Button>
+                                                                </Grid>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="No checkpoints." FontSize="12"
-                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                       Visibility="{x:Bind ViewModel.Details.Session.HasCheckpoints, Mode=OneWay, Converter={StaticResource BoolToVis}, ConverterParameter=invert}" />
-                        </StackPanel>
-
-                        <!-- Snapshots -->
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="Status snapshots" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <ItemsControl ItemsSource="{x:Bind ViewModel.Details.Snapshots}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="models:SnapshotInfo">
-                                        <Grid ColumnSpacing="10" Padding="0,4">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="150" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="{x:Bind Timestamp, Converter={StaticResource FriendlyDate}}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            <TextBlock Grid.Column="1" Text="{x:Bind SourceTrigger, Converter={StaticResource StringOrDash}}" FontSize="12" TextTrimming="CharacterEllipsis" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
 
                     </StackPanel>
                     </ScrollViewer>
@@ -779,9 +720,13 @@
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
-                                <Grid ColumnSpacing="12">
+                                <TextBlock Text="These are Copilot's tracked work items for this session, not tasks assigned to you. The read-only table shows each task's status and timestamps as stored. Reopen this tab or select Refresh to load the latest tasks."
+                                           TextWrapping="Wrap" Margin="0,0,0,8"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Grid Grid.Row="1" ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
@@ -789,15 +734,12 @@
                                     <StackPanel Spacing="2">
                                         <TextBlock Text="{x:Bind ViewModel.Details.Todos.CountsText, Mode=OneWay}"
                                                    TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
-                                        <TextBlock Text="Copilot's work list (read-only). Timestamps are shown as stored."
-                                                   FontSize="12" TextWrapping="Wrap"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
                                     <Button Grid.Column="1" Content="Refresh"
                                             Command="{x:Bind ViewModel.Details.Todos.RefreshCommand}"
                                             AutomationProperties.Name="Refresh agent tasks" />
                                 </Grid>
-                                <StackPanel Grid.Row="1" Spacing="8">
+                                <StackPanel Grid.Row="2" Spacing="8">
                                     <TextBlock Text="Loading agent tasks..."
                                                Visibility="{x:Bind ViewModel.Details.Todos.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVis}}"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -810,7 +752,7 @@
                                                Visibility="{x:Bind ViewModel.Details.Todos.Warning, Mode=OneWay, Converter={StaticResource StringToVis}}"
                                                TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
-                                <ScrollViewer Grid.Row="2" HorizontalScrollMode="Enabled"
+                                <ScrollViewer Grid.Row="3" HorizontalScrollMode="Enabled"
                                               HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollMode="Disabled"
                                               VerticalScrollBarVisibility="Disabled"
@@ -914,6 +856,60 @@
                                 </Grid>
                                 </ScrollViewer>
                             </Grid>
+                        </TabViewItem>
+                        <TabViewItem IsClosable="False" AutomationProperties.Name="Checkpoints">
+                            <TabViewItem.Header>
+                                <Grid MinWidth="112" Height="28">
+                                    <TextBlock Text="Checkpoints" FontSize="16" FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Border Height="3" CornerRadius="1" VerticalAlignment="Bottom"
+                                            Background="{ThemeResource SystemControlHighlightAccentBrush}"
+                                            Visibility="{x:Bind ViewModel.Details.IsCheckpointsTabSelected, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
+                                </Grid>
+                            </TabViewItem.Header>
+                            <ScrollViewer Padding="8,8,8,0"
+                                          BorderThickness="0,1,0,0"
+                                          BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Checkpoints are saved summaries of this session's progress and context. Each entry shows its number, title, and file's last-modified date/time (local time with UTC offset), newest checkpoint first."
+                                               TextWrapping="Wrap" Margin="0,0,0,8"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="Loading checkpoints..."
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Visibility="{x:Bind ViewModel.Details.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock Text="{x:Bind ViewModel.Details.SectionLoadError, Mode=OneWay}"
+                                               TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
+                                               Visibility="{x:Bind ViewModel.Details.SectionLoadError, Mode=OneWay, Converter={StaticResource StringToVis}}" />
+                                    <ItemsControl ItemsSource="{x:Bind ViewModel.Details.Checkpoints}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="models:CheckpointInfo">
+                                                <Grid ColumnSpacing="10" Padding="0,4">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="4" Padding="6,2" VerticalAlignment="Top">
+                                                        <TextBlock Text="{x:Bind Number}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="2">
+                                                        <TextBlock Text="{x:Bind Title, Converter={StaticResource StringOrDash}}" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{x:Bind Timestamp, Converter={StaticResource FriendlyDate}, ConverterParameter=absolute}"
+                                                                   FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                                   ToolTipService.ToolTip="Checkpoint file last modified (local time)"
+                                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                        <TextBlock Text="{x:Bind FilePath, Converter={StaticResource StringOrDash}}"
+                                                                   FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="No checkpoints." FontSize="12"
+                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Visibility="{x:Bind ViewModel.Details.ShowNoCheckpoints, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                            </ScrollViewer>
                         </TabViewItem>
                     </TabView>
                 </Grid>

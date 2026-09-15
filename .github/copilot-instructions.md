@@ -12,6 +12,7 @@ This repo's knowledge base lives in [`docs/`](../docs/README.md). Read it before
 Key invariants (see docs for detail):
 - **Read-only by design** — the app never writes to `~/.copilot`; its only side effect is launching `copilot --resume=<id>` in a terminal.
 - **Platform-neutral Core, thin Windows host** — all logic lives in `Searchlight.Core` (`net10.0`, zero WinUI); `Searchlight` is the WinUI 3 tray exe; `Searchlight.Core.Tests` is xUnit over Core.
+- **Native Copilot sources only** — session metadata comes from Copilot's session-state files, never personal journals, status-snapshot indexes, or custom hooks. Preserve lazy per-tab reads and unknown optional values; see `docs/data-model.md` for provenance.
 - **Two data sources behind one `ISessionDataSource` façade** — the live source over real `~/.copilot`, and a synthetic **mock** source (deterministic sessions) for demos/screenshots/tests, so no proprietary data leaks.
 - Commit linear on `main` with the `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>` trailer.
 

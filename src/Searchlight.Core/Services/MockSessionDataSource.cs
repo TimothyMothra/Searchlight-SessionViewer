@@ -7,7 +7,7 @@ namespace Searchlight.Services;
 /// Produces a fixed set of deterministic sessions (stable ids and relative timestamps)
 /// that exercise every recency bucket (≤2h/4h/8h/16h/32h/older), both clients
 /// (CLI/App) plus Unknown, and both kinds (Project/Chat) — with checkpoints,
-/// snapshots, and todos — so the UI can be exercised without touching the user's real
+/// and todos — so the UI can be exercised without touching the user's real
 /// <c>~/.copilot</c> tree or leaking any proprietary content.
 /// </summary>
 public sealed class MockSessionDataSource : ISessionDataSource
@@ -18,7 +18,6 @@ public sealed class MockSessionDataSource : ISessionDataSource
 
     private readonly List<SessionInfo> _sessions;
     private readonly Dictionary<string, IReadOnlyList<CheckpointInfo>> _checkpoints = new();
-    private readonly Dictionary<string, IReadOnlyList<SnapshotInfo>> _snapshots = new();
     private readonly Dictionary<string, IReadOnlyList<SessionTodo>> _todos = new();
 
     /// <summary>Builds the fixed synthetic dataset.</summary>
@@ -42,10 +41,6 @@ public sealed class MockSessionDataSource : ISessionDataSource
     /// <inheritdoc />
     public IReadOnlyList<CheckpointInfo> ReadCheckpoints(SessionInfo session) =>
         _checkpoints.TryGetValue(session.Id, out var c) ? c : [];
-
-    /// <inheritdoc />
-    public IReadOnlyList<SnapshotInfo> LoadSnapshots(string sessionId) =>
-        _snapshots.TryGetValue(sessionId, out var s) ? s : [];
 
     /// <inheritdoc />
     public SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default)
@@ -159,7 +154,7 @@ public sealed class MockSessionDataSource : ISessionDataSource
 
     /// <summary>
     /// Constructs one synthetic <see cref="SessionInfo"/> and, when
-    /// <paramref name="withDetail"/> is set, seeds matching checkpoints, snapshots,
+    /// <paramref name="withDetail"/> is set, seeds matching checkpoints
     /// and todos so the details pane is fully populated for screenshots.
     /// </summary>
     private SessionInfo Make(
@@ -185,9 +180,15 @@ public sealed class MockSessionDataSource : ISessionDataSource
             Name = name,
             ClientName = client,
             Cwd = @"C:\REPOS\DemoApp",
+            GitRoot = @"C:\REPOS\DemoApp",
+            Repository = "demo/DemoApp",
+            HostType = "github",
+            Branch = branch,
             CreatedAt = updated.AddMinutes(-30),
             UpdatedAt = updated,
             UserNamed = name is not null,
+            SummaryCount = withDetail ? 3 : 0,
+            RemoteSteerable = client == "github/autopilot",
         };
 
         var start = new SessionStartInfo
@@ -199,6 +200,10 @@ public sealed class MockSessionDataSource : ISessionDataSource
             Producer = client == "github/autopilot" ? "copilot-autopilot" : "copilot-agent",
             StartTime = updated.AddMinutes(-30),
             Cwd = @"C:\REPOS\DemoApp",
+            Branch = branch,
+            GitRoot = @"C:\REPOS\DemoApp",
+            Repository = "demo/DemoApp",
+            AlreadyInUse = false,
             FirstUserPrompt = prompt,
             // ASSUMPTION: detailed fixtures have follow-up turns; plain fixtures have one turn.
             LastUserPrompt = withDetail ? $"Summarize the changes for {title.ToLowerInvariant()} and any remaining work." : prompt,
@@ -213,13 +218,10 @@ public sealed class MockSessionDataSource : ISessionDataSource
             LastWriteTime = updated,
             Workspace = workspace,
             Start = start,
-            Branch = branch,
-            SnapshotCount = withDetail ? 3 : 0,
             HasCheckpoints = withDetail,
             HasSessionDb = withDetail,
             HasPlan = withDetail,
             IsInUse = minutesAgo < 30,
-            JournalActivity = withDetail ? $"working on {title.ToLowerInvariant()}" : null,
 
             // Every synthetic session represents a real conversation, so it is both
             // fully enriched and non-empty — the list's default "hide empty sessions"
@@ -235,13 +237,6 @@ public sealed class MockSessionDataSource : ISessionDataSource
                 new CheckpointInfo { Number = 1, Title = $"Planning {title.ToLowerInvariant()}", FilePath = $@"{folderPath}\checkpoints\001-planning.md", Timestamp = updated.AddMinutes(-25) },
                 new CheckpointInfo { Number = 2, Title = "Implementing the core change", FilePath = $@"{folderPath}\checkpoints\002-impl.md", Timestamp = updated.AddMinutes(-15) },
                 new CheckpointInfo { Number = 3, Title = "Build-verified and cleaned up", FilePath = $@"{folderPath}\checkpoints\003-verify.md", Timestamp = updated.AddMinutes(-5) },
-            ];
-
-            _snapshots[id] =
-            [
-                new SnapshotInfo { SnapshotId = 1, SessionId = id, Branch = branch, Cwd = @"C:\REPOS\DemoApp", TimestampIso = updated.AddMinutes(-20).ToString("o"), Timestamp = updated.AddMinutes(-20), SourceTrigger = "ask_user" },
-                new SnapshotInfo { SnapshotId = 2, SessionId = id, Branch = branch, Cwd = @"C:\REPOS\DemoApp", TimestampIso = updated.AddMinutes(-10).ToString("o"), Timestamp = updated.AddMinutes(-10), SourceTrigger = "long_turn" },
-                new SnapshotInfo { SnapshotId = 3, SessionId = id, Branch = branch, Cwd = @"C:\REPOS\DemoApp", TimestampIso = updated.AddMinutes(-2).ToString("o"), Timestamp = updated.AddMinutes(-2), SourceTrigger = "task_complete" },
             ];
 
             _todos[id] =

@@ -46,4 +46,28 @@ public sealed class DetailsViewModelCopyIdTests
         Assert.Equal(vm.Session!.Id, clipboard.LastCopiedText);
         Assert.Equal("Session id copied to clipboard.", vm.StatusMessage);
     }
+
+    [Fact]
+    public async Task OverviewCopyButton_UsesExistingCommandAndTracksSessionSelection()
+    {
+        DetailsViewModel vm = BuildViewModel(out MockClipboardService clipboard);
+        var sessions = new MockSessionDataSource().LoadAll();
+        foreach (var session in sessions.Take(2))
+        {
+            vm.Load(session);
+            // Copy is available immediately, without waiting for the metadata read.
+            var copyField = Assert.Single(vm.MetadataGroups.SelectMany(g => g.Fields), field => field.CanCopy);
+            Assert.Equal("Session ID", copyField.Label);
+            Assert.Contains(copyField, vm.MetadataGroups.Single(g => g.Title == "Overview").Fields);
+            Assert.Equal(session.Id, copyField.Value);
+            Assert.Same(vm.CopyIdCommand, copyField.CopyCommand);
+            Assert.True(copyField.CopyCommand!.CanExecute(null));
+            copyField.CopyCommand.Execute(null);
+            Assert.Equal(session.Id, clipboard.LastCopiedText);
+            await vm.CurrentLoad;
+        }
+        vm.Load(null);
+        Assert.Empty(vm.MetadataGroups);
+        Assert.False(vm.CopyIdCommand.CanExecute(null));
+    }
 }

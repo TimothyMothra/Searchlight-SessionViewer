@@ -20,8 +20,10 @@ _Captured using the `Demo` build config (synthetic data) so no proprietary sessi
 
 - **Frequency-sorted session list** with recency group headers (Last 2h / 4h / 8h / 16h / 32h,
   then grouped by day).
-- **Details pane** — model, reasoning effort, first-prompt preview, checkpoints, status snapshots,
-  client type (CLI vs App), and more.
+- **Lazy section tabs** — Details displays all parsed native session/workspace/event metadata
+  and first/last prompt previews; Agent tasks and Checkpoints load only when opened.
+- **Native Copilot sources only** — no custom journaling extension or status-snapshot hook
+  required. Missing optional metadata is shown explicitly.
 - **One-click Resume** — hands off to `copilot --resume=<id>` in Windows Terminal.
 - **System tray** — lives in the tray like ScriptTray; hides on close, exits from the tray menu.
 - **Read-only by design** — never writes to `~/.copilot`.

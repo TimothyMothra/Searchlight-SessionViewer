@@ -70,6 +70,62 @@ public sealed class TodosViewModelTests
         Assert.Equal(0, source.Calls);
     }
 
+    [Theory]
+    [InlineData(DetailsViewModel.CheckpointsTabIndex)]
+    public async Task SectionTabs_PreserveSelectionOnRefreshAndNeverReadTodos(int tabIndex)
+    {
+        var source = new TodoSource();
+        var details = CreateDetails(source);
+        details.Load(source.Session);
+        await details.CurrentLoad;
+        var notifications = new List<string?>();
+        details.PropertyChanged += (_, e) => notifications.Add(e.PropertyName);
+
+        details.SelectedTabIndex = tabIndex;
+        Assert.False(details.IsDetailsTabSelected);
+        Assert.Equal(tabIndex == DetailsViewModel.CheckpointsTabIndex, details.IsCheckpointsTabSelected);
+        Assert.False(details.IsAgentTasksTabSelected);
+        Assert.Contains(nameof(details.IsCheckpointsTabSelected), notifications);
+        Assert.False(details.Todos.RefreshCommand.CanExecute(null));
+
+        details.Load(source.Session with { CustomName = "Updated" }, refresh: true);
+        await details.CurrentLoad;
+        Assert.Equal(tabIndex, details.SelectedTabIndex);
+        Assert.Equal(0, source.Calls);
+        details.Load(source.Session with { Id = "next" });
+        await details.CurrentLoad;
+        Assert.Equal(DetailsViewModel.DetailsTabIndex, details.SelectedTabIndex);
+        Assert.Equal(0, source.Calls);
+    }
+
+    [Fact]
+    public async Task SectionEmptyStates_UseLoadedCollectionsAndHideWhileLoadingOrUnselected()
+    {
+        var source = new MockSessionDataSource();
+        var details = new DetailsViewModel(source, new MockResumeLauncher(), new MockClipboardService());
+        Assert.False(details.ShowNoCheckpoints);
+        details.Load(source.LoadAll().First(session => session.HasCheckpoints));
+        await details.CurrentLoad;
+        Assert.False(details.HasLoadedCheckpoints);
+        details.SelectedTabIndex = DetailsViewModel.CheckpointsTabIndex;
+        await details.CurrentLoad;
+        Assert.False(details.ShowNoCheckpoints);
+
+        // ASSUMPTION: folder/count metadata can outlive its files; the displayed collections
+        // determine emptiness, not the session's summary flags.
+        var notifications = new List<string?>();
+        details.PropertyChanged += (_, e) => notifications.Add(e.PropertyName);
+        details.Checkpoints.Clear();
+        Assert.True(details.ShowNoCheckpoints);
+        Assert.Contains(nameof(details.ShowNoCheckpoints), notifications);
+        details.IsLoading = true;
+        Assert.False(details.ShowNoCheckpoints);
+        details.IsLoading = false;
+        Assert.True(details.ShowNoCheckpoints);
+        details.Load(null);
+        Assert.False(details.ShowNoCheckpoints);
+    }
+
     [Fact]
     public async Task OpeningReopeningAndRefresh_EachReadOneFreshSnapshot()
     {
@@ -78,19 +134,19 @@ public sealed class TodosViewModelTests
         details.Load(source.Session);
         Assert.True(details.IsDetailsTabSelected);
         Assert.False(details.IsAgentTasksTabSelected);
-        details.SelectedTabIndex = 1;
+        details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
         await details.Todos.CurrentLoad;
         Assert.False(details.IsDetailsTabSelected);
         Assert.True(details.IsAgentTasksTabSelected);
         Assert.Equal("Read 1", Assert.Single(details.Todos.Items).Description);
 
-        details.SelectedTabIndex = 1;
+        details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
         await details.Todos.CurrentLoad;
         Assert.Equal(1, source.Calls);
 
         details.SelectedTabIndex = 0;
         Assert.False(details.Todos.RefreshCommand.CanExecute(null));
-        details.SelectedTabIndex = 1;
+        details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
         await details.Todos.CurrentLoad;
         Assert.Equal("Read 2", Assert.Single(details.Todos.Items).Description);
 
@@ -106,12 +162,12 @@ public sealed class TodosViewModelTests
         var source = new TodoSource();
         var details = CreateDetails(source);
         details.Load(source.Session);
-        details.SelectedTabIndex = 1;
+        details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
         await details.Todos.CurrentLoad;
         var result = details.Todos.Result;
         details.Load(source.Session with { CustomName = "New title" }, refresh: true);
         await details.CurrentLoad;
-        Assert.Equal(1, details.SelectedTabIndex);
+        Assert.Equal(DetailsViewModel.AgentTasksTabIndex, details.SelectedTabIndex);
         Assert.Same(result, details.Todos.Result);
 
         using var main = new MainViewModel(source, new NullSessionWatcher(), details,
@@ -119,7 +175,7 @@ public sealed class TodosViewModelTests
         main.SelectedSession = source.Session;
         await main.LoadCommand.ExecuteAsync(null);
         await details.CurrentLoad;
-        Assert.Equal(1, details.SelectedTabIndex);
+        Assert.Equal(DetailsViewModel.AgentTasksTabIndex, details.SelectedTabIndex);
         Assert.Equal(1, source.Calls);
         Assert.Same(result, details.Todos.Result);
     }
@@ -132,7 +188,7 @@ public sealed class TodosViewModelTests
         var source = new TodoSource();
         var details = CreateDetails(source);
         details.Load(source.Session);
-        details.SelectedTabIndex = 1;
+        details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
         await details.Todos.CurrentLoad;
         details.Load(changeId ? source.Session with { Id = "next" } : source.Session with { FolderPath = "next" });
         await details.CurrentLoad;
@@ -140,7 +196,7 @@ public sealed class TodosViewModelTests
         Assert.Null(details.Todos.Result);
         Assert.Empty(details.Todos.CountsText);
         Assert.Equal(1, source.Calls);
-        details.SelectedTabIndex = 1;
+        details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
         await details.Todos.CurrentLoad;
         Assert.Equal(2, source.Calls);
     }
@@ -163,7 +219,7 @@ public sealed class TodosViewModelTests
         try
         {
             details.Load(source.Session);
-            details.SelectedTabIndex = 1;
+            details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.True(details.Todos.IsLoading);
             Assert.False(details.Todos.RefreshCommand.CanExecute(null));
@@ -206,11 +262,11 @@ public sealed class TodosViewModelTests
         try
         {
             details.Load(source.Session);
-            details.SelectedTabIndex = 1;
+            details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Task old = details.Todos.CurrentLoad;
             details.Load(source.Session with { Id = "next" });
-            details.SelectedTabIndex = 1;
+            details.SelectedTabIndex = DetailsViewModel.AgentTasksTabIndex;
             gate.Set();
             await Task.WhenAll(old, details.Todos.CurrentLoad, details.CurrentLoad);
             Assert.Equal("next", Assert.Single(details.Todos.Items).Title);
@@ -316,7 +372,6 @@ public sealed class TodosViewModelTests
         public SessionInfo EnrichOne(SessionInfo session) => session;
         public SessionInfo EnrichWithEvents(SessionInfo session) => session;
         public IReadOnlyList<CheckpointInfo> ReadCheckpoints(SessionInfo session) => [];
-        public IReadOnlyList<SnapshotInfo> LoadSnapshots(string sessionId) => [];
         public SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default)
         {
             int call = Interlocked.Increment(ref Calls);

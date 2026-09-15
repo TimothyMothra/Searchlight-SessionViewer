@@ -23,8 +23,13 @@ public sealed record SessionStartInfo
     /// <summary>Working directory captured in the start event context.</summary>
     public string? Cwd { get; init; }
 
+    /// <summary>Git context recorded in session.start, not a live repository query.</summary>
+    public string? Branch { get; init; }
+    public string? GitRoot { get; init; }
+    public string? Repository { get; init; }
+
     /// <summary>True if the session was already in use when started.</summary>
-    public bool AlreadyInUse { get; init; }
+    public bool? AlreadyInUse { get; init; }
 
     /// <summary>
     /// Effective model — the <c>selectedModel</c> from <c>session.start</c> if

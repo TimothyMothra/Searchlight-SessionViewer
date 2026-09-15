@@ -70,6 +70,7 @@ public sealed partial class StringOrDashConverter : IValueConverter
 /// <summary>
 /// Formats a <see cref="DateTimeOffset"/> as a compact friendly string
 /// (relative for the last day, otherwise local date + time).
+/// The <c>absolute</c> parameter always includes local date, time, seconds, and offset.
 /// </summary>
 public sealed partial class FriendlyDateConverter : IValueConverter
 {
@@ -81,6 +82,11 @@ public sealed partial class FriendlyDateConverter : IValueConverter
         }
 
         DateTimeOffset local = dto.ToLocalTime();
+        // ASSUMPTION: explicit timestamps use local time like the rest of the UI;
+        // include the offset so daylight-saving transitions remain unambiguous.
+        if (parameter is string format && format == "absolute")
+            return local.ToString("yyyy-MM-dd HH:mm:ss zzz", System.Globalization.CultureInfo.InvariantCulture);
+
         TimeSpan age = DateTimeOffset.Now - local;
 
         if (age < TimeSpan.Zero)

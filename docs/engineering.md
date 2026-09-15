@@ -348,7 +348,7 @@ The Core extraction is what makes the app testable — **no WinUI, no real `~/.c
 - `SessionInfoProjectionTests` — pure projections (`DisplayName` full-Id fallback, `ShortId`,
   `ClientLabel`/`IsCli`/`IsApp`, `ClientNameRaw`, `Cwd` fallback, `UpdatedAt` precedence).
 - `MockSessionDataSourceTests` — locks the fixture shape (15 sessions, 6 detailed, seeded
-  checkpoints/snapshots/todos).
+  native checkpoints/todos).
 - `MainViewModelGroupingTests` — integration: a real `MainViewModel` over the mock (no FS/WinUI)
   asserting counts, grouping, newest-first ordering, and branch filtering.
 

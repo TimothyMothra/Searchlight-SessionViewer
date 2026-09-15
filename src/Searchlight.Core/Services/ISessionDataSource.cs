@@ -17,14 +17,14 @@ public interface ISessionDataSource
     /// <summary>
     /// Catalog pass: cached summaries for unchanged sessions, otherwise cheap
     /// placeholders (id/folder/kind/mtime), sorted newest-first. Only placeholders
-    /// need upgrading via <see cref="EnrichOne"/>; live sources refresh bulk maps.
+    /// need upgrading via <see cref="EnrichOne"/>.
     /// </summary>
     IReadOnlyList<SessionInfo> LoadCheap();
 
     /// <summary>
     /// Fully enriches one cheap placeholder from <see cref="LoadCheap"/> with its
-    /// workspace.yaml facts, presence flags, and bulk branch/snapshot/journal
-    /// enrichment. Events head-parsing is still deferred to <see cref="EnrichWithEvents"/>.
+    /// native workspace.yaml facts and file-presence flags.
+    /// Events head-parsing is still deferred to <see cref="EnrichWithEvents"/>.
     /// </summary>
     SessionInfo EnrichOne(SessionInfo session);
 
@@ -34,15 +34,16 @@ public interface ISessionDataSource
     /// <summary>Checkpoints for the given session (newest first).</summary>
     IReadOnlyList<CheckpointInfo> ReadCheckpoints(SessionInfo session);
 
-    /// <summary>Recent status snapshots for the given session id (newest first).</summary>
-    IReadOnlyList<SnapshotInfo> LoadSnapshots(string sessionId);
-
     /// <summary>Fresh todo snapshot, read only on Todos activation or explicit Todos refresh.</summary>
     SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default);
 
     /// <summary>
-    /// Version of detail inputs, checked on a worker when selecting or refreshing.
+    /// Version of metadata/event inputs, checked only when opening or refreshing Details.
     /// In-memory sources are immutable unless they override this value.
     /// </summary>
     string GetDetailsVersion(SessionInfo session) => string.Empty;
+
+    /// <summary>Version checked only when opening or refreshing Checkpoints.</summary>
+    string GetCheckpointsVersion(SessionInfo session) => string.Empty;
+
 }

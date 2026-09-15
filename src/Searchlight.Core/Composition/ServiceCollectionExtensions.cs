@@ -30,8 +30,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<WorkspaceYamlReader>();
         services.AddSingleton<SessionStateScanner>();
         services.AddSingleton<EventsJsonlReader>();
-        services.AddSingleton<SnapshotIndexReader>();
-        services.AddSingleton<JournalReader>();
         services.AddSingleton<CheckpointsReader>();
         services.AddSingleton<SessionDbReader>();
         services.AddSingleton<SessionAggregator>();

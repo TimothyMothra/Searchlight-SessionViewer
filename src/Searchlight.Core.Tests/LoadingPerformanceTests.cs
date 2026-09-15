@@ -219,24 +219,20 @@ public sealed class LoadingPerformanceTests
     {
         var source = new CountingSource(1);
         var vm = new DetailsViewModel(source, new MockResumeLauncher(), new MockClipboardService());
-        SessionInfo original = source.Sessions[0] with { Branch = "old", JournalActivity = "before" };
+        SessionInfo original = source.Sessions[0] with { Workspace = new WorkspaceMetadata { Branch = "old" } };
         vm.Load(original);
         await vm.CurrentLoad;
 
         SessionInfo updated = original with
         {
             IsEnriched = true,
-            Branch = "new",
-            JournalActivity = "after",
-            SnapshotCount = 3,
-            Workspace = new WorkspaceMetadata { Name = "updated summary" },
+            Workspace = new WorkspaceMetadata { Name = "updated summary", Branch = "new", SummaryCount = 3 },
         };
         vm.Load(updated, refresh: true);
         await vm.CurrentLoad;
 
         Assert.Equal("new", vm.Session!.Branch);
-        Assert.Equal("after", vm.Session.JournalActivity);
-        Assert.Equal(3, vm.Session.SnapshotCount);
+        Assert.Equal(3L, vm.Session.Workspace!.SummaryCount);
         Assert.Equal("updated summary", vm.Session.DisplayName);
         Assert.Equal(1, source.EventCalls);
     }
@@ -320,7 +316,6 @@ public sealed class LoadingPerformanceTests
             return session;
         }
         public IReadOnlyList<CheckpointInfo> ReadCheckpoints(SessionInfo session) => [];
-        public IReadOnlyList<SnapshotInfo> LoadSnapshots(string id) => [];
         public SessionTodosResult ReadTodos(SessionInfo session, CancellationToken token = default) => new();
         public string GetDetailsVersion(SessionInfo session)
         {

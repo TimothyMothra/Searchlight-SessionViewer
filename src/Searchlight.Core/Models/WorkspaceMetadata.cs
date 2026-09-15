@@ -13,6 +13,12 @@ public sealed record WorkspaceMetadata
     /// <summary>Working directory the session was started against.</summary>
     public string? Cwd { get; init; }
 
+    /// <summary>Native workspace Git context, when recorded by the client.</summary>
+    public string? GitRoot { get; init; }
+    public string? Repository { get; init; }
+    public string? HostType { get; init; }
+    public string? Branch { get; init; }
+
     /// <summary>Client that created the session, e.g. <c>github/autopilot</c>.</summary>
     public string? ClientName { get; init; }
 
@@ -20,10 +26,10 @@ public sealed record WorkspaceMetadata
     public string? Name { get; init; }
 
     /// <summary>True when the user explicitly named the session.</summary>
-    public bool UserNamed { get; init; }
+    public bool? UserNamed { get; init; }
 
     /// <summary>Number of summaries recorded for the session.</summary>
-    public int SummaryCount { get; init; }
+    public long? SummaryCount { get; init; }
 
     /// <summary>UTC creation timestamp.</summary>
     public DateTimeOffset? CreatedAt { get; init; }
@@ -32,7 +38,7 @@ public sealed record WorkspaceMetadata
     public DateTimeOffset? UpdatedAt { get; init; }
 
     /// <summary>Whether the session is remotely steerable.</summary>
-    public bool RemoteSteerable { get; init; }
+    public bool? RemoteSteerable { get; init; }
 
     /// <summary>Mission-control task id, when present.</summary>
     public string? McTaskId { get; init; }

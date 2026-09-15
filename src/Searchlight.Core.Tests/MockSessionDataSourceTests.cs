@@ -57,12 +57,11 @@ public sealed class MockSessionDataSourceTests
     }
 
     [Fact]
-    public void DetailSession_SeedsCheckpointsSnapshotsAndTodos()
+    public void DetailSession_SeedsCheckpointsAndTodos()
     {
         SessionInfo detail = _sut.LoadAll().First(s => s.Id == DetailId);
 
         Assert.Equal(3, _sut.ReadCheckpoints(detail).Count);
-        Assert.Equal(3, _sut.LoadSnapshots(detail.Id).Count);
         SessionTodosResult result = _sut.ReadTodos(detail);
         Assert.Equal(SessionTodosStatus.Success, result.Status);
         Assert.Equal(4, result.Todos.Count);
@@ -72,7 +71,7 @@ public sealed class MockSessionDataSourceTests
             Assert.False(string.IsNullOrWhiteSpace(todo.CreatedAt));
             Assert.False(string.IsNullOrWhiteSpace(todo.UpdatedAt));
         });
-        Assert.Equal(3, detail.SnapshotCount);
+        Assert.Equal(3L, detail.Workspace!.SummaryCount);
         Assert.True(detail.HasSessionDb);
         Assert.True(detail.HasPlan);
     }
@@ -92,10 +91,8 @@ public sealed class MockSessionDataSourceTests
 
         Assert.False(plain.HasCheckpoints);
         Assert.Empty(_sut.ReadCheckpoints(plain));
-        Assert.Empty(_sut.LoadSnapshots(plain.Id));
         Assert.Empty(_sut.ReadTodos(plain).Todos);
         Assert.Equal(SessionTodosStatus.MissingDatabase, _sut.ReadTodos(plain).Status);
-        Assert.Equal(0, plain.SnapshotCount);
     }
 
     [Fact]

@@ -14,15 +14,6 @@ public static class CopilotPaths
     /// <summary>The <c>session-state</c> directory holding per-session folders.</summary>
     public static string SessionState { get; } = Path.Combine(Root, "session-state");
 
-    /// <summary>The <c>status-snapshots</c> directory (holds <c>index.db</c>).</summary>
-    public static string StatusSnapshots { get; } = Path.Combine(Root, "status-snapshots");
-
-    /// <summary>The status-snapshot SQLite index database.</summary>
-    public static string SnapshotIndexDb { get; } = Path.Combine(StatusSnapshots, "index.db");
-
-    /// <summary>The <c>journal</c> directory holding monthly markdown files.</summary>
-    public static string Journal { get; } = Path.Combine(Root, "journal");
-
     /// <summary>Absolute path to a session's <c>events.jsonl</c>.</summary>
     public static string EventsJsonl(string folderPath) =>
         Path.Combine(folderPath, "events.jsonl");

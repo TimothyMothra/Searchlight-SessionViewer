@@ -12,13 +12,26 @@ states so an unavailable source cannot look like an empty todo table.
 
 `CopilotPaths` resolves every path under `~/.copilot`; the app never writes user Copilot data.
 
+**Native sources only.** The app consumes Copilot's own session-state files, not personal
+extensions. The former monthly Markdown journal and `status-snapshots/index.db` integrations
+have been removed, including their readers, branch/activity enrichment, and Status snapshots
+tab. No journaling skill, snapshot hook, SDK installation, or separate index is required.
+Searchlight's own settings/notes remain app-owned state, not claimed Copilot metadata.
+
+Source provenance is supported by GitHub's official SDK
+[session filesystem tests](https://github.com/github/copilot-sdk/blob/main/nodejs/test/e2e/session_fs.e2e.test.ts)
+(events, workspace, checkpoint index, plan),
+[SQLite tests](https://github.com/github/copilot-sdk/blob/main/nodejs/test/e2e/session_fs_sqlite.e2e.test.ts)
+(native SQL/todos), [workspace schema](https://github.com/github/copilot-sdk/blob/main/java/sdk/src/generated/java/com/github/copilot/generated/rpc/SessionWorkspacesGetWorkspaceResult.java),
+and [event schema](https://github.com/github/copilot-sdk/blob/main/nodejs/src/generated/session-events.ts).
+These establish native provenance, not a promise of a stable on-disk API. Files and optional
+fields vary by client/version; unsupported or missing data must remain explicit.
+
 | Source (under `~/.copilot`) | Reader | What it yields | Cost |
 |-----------------------------|--------|----------------|------|
 | `session-state/<id>/` folders | `SessionStateScanner` | One base `SessionInfo` per folder: `Id`, `FolderName`, `FolderPath`, `Kind`, `LastWriteTime`, presence flags (`IsInUse` via `inuse.<PID>.lock`, `HasPlan`, `HasSessionDb`, `HasCheckpoints`, `HasEvents`) and `IsEnriched`. Splits `optimistic-chat-` prefix → `Chat`, else `Project`. | cheap (bulk) |
-| `session-state/<id>/workspace.yaml` | `WorkspaceYamlReader` | `WorkspaceMetadata` (name, cwd, `client_name`, created/updated, user-named, summary count, MC ids) via YamlDotNet. | cheap (bulk) |
+| `session-state/<id>/workspace.yaml` | `WorkspaceYamlReader` | `WorkspaceMetadata` (id, name, cwd, Git root/repository/host/branch, client, created/updated, user-named, summary count, remote steering, MC ids) via YamlDotNet. Optional booleans/counts remain nullable. | cheap (bulk) |
 | `session-state/<id>/events.jsonl` | `EventsJsonlReader` | `SessionStartInfo` — UTF-8 head preview bounded by 2,000 lines and 8 MiB input, with individual events over 1 MiB skipped: `session.start` baseline + latest in-window `session.model_change` + first in-window `user.message` preview. A separate reverse scan finds the last prompt with the same per-scan limits. Documents are disposed without cloning; the complete log is never materialized. Limit hits are logged. | heavy (lazy, cached) |
-| `status-snapshots/index.db` (table `snapshots`) | `SnapshotIndexReader` | Branch + snapshot count per session (bulk index scan); `SnapshotInfo` rows on demand. Read-only SQLite. | cheap bulk / heavy detail |
-| `journal/<YYYY-MM>.md` | `JournalReader` | `JournalEntry` rows from the pipe table `\| time \| session_id \| branch \| cwd \| activity \|`; last row wins per session → `JournalActivity`. | cheap (bulk) |
 | `session-state/<id>/checkpoints/NNN-title.md` + `index.md` | `CheckpointsReader` | `CheckpointInfo` list; prefers the fuller title from `index.md`'s table over the truncated file name. | heavy (lazy) |
 | `session-state/<id>/session.db` (table `todos`) | `SessionDbReader.ReadTodos` | `SessionTodosResult`: todo rows, missing-field warnings, and explicit availability/error state. Read-only SQLite. The legacy combined reader still supports `session_state`, but the UI never calls it. | heavy (explicit Todos activation only) |
 
@@ -28,12 +41,49 @@ publication, then loads remaining summaries in **30-row batches**. This preserve
 name/folder/branch search without preloading event content. Note-presence is indexed once per
 refresh rather than probing the filesystem during search.
 
-Events, checkpoints and snapshots load asynchronously on selection. A versioned,
-eight-entry LRU cache retains recently selected details, including empty results, without
-accumulating details for every visited session. File length/last-write time and snapshot-index WAL
-versions are used for invalidation; unchanged filtering does not even recheck these files.
-The Details tab does not read `session.db`. See
+Events load asynchronously when Details is active (the default on session selection).
+Checkpoint lists load only when their tab is opened.
+A versioned, eight-entry LRU cache shared across session/section keys retains recent payloads,
+including empty results, without accumulating details for every visited session.
+Only the active section's input versions are checked: workspace/events for Details, checkpoint
+directory and individual Markdown files for Checkpoints.
+Unchanged filtering does not even recheck these files. Catalog-wide branches come from native
+workspace summaries, without eagerly parsing event content.
+The Details and Checkpoints tabs do not read `session.db`. See
 [architecture.md](./architecture.md) for refresh, cancellation and cache assumptions.
+
+**Section tabs.** The session pane has three tabs beneath the shared title and actions:
+**Details** (metadata and prompt previews), **Agent tasks** (the tracked-work table),
+and **Checkpoints** (checkpoint numbers, titles, file paths, and file last-modified times).
+The latter two begin with a short explanation of their contents. Checkpoints has its own
+scrolling list, loading indicator, empty message, and visible retryable
+load-error message. No checkpoint content is read before activation. Reopening a section rechecks
+only its source versions and reuses unchanged cached results. Leaving cancels queued work and
+prevents obsolete results from publishing. Selecting another session returns to Details;
+refreshing the same session retains and refreshes only the active section (Agent tasks keeps
+its separate explicit-refresh contract below). Hidden sections are checked when next opened.
+Checkpoint last-modified times display full local date/time, seconds, and UTC offset;
+unavailable timestamps show a dash.
+
+**All parsed native metadata.** Details starts with a compact **Overview** in the familiar
+order: session ID with its copy button, folder, branch, model, reasoning, version,
+workspace Created/Updated times, and first/last prompts. Session ID is no longer a subtitle
+or a Session storage row; its copy action retains the existing clipboard command and remains
+available while Details loads.
+The copy button sits immediately after the left-aligned ID rather than at the value column's
+right edge. The pinned session title stays beside the actions when its measured width fits;
+otherwise it moves to a full-width row below them. It never wraps, using ellipsis only when
+the full row is still too narrow.
+Created/Updated appear only in Overview (missing workspace dates stay unknown); Client appears
+only in Workspace metadata.
+The additional **Workspace metadata** and **Event metadata** groups follow; **Session storage**
+is last. Prompts appear only in the overview. `SessionMetadata` is an explicit,
+I/O-free display allowlist; tests require coverage of all parsed workspace/start-record fields.
+It displays recorded names and identifiers, both workspace/start working directories and Git
+context, creation/update/start/folder timestamps, optional flags/counts, client-specific MC IDs,
+runtime configuration, file-presence flags, and both prompts. Unknown is a dash, distinct from
+known **No** or **0**. File flags wait for enrichment; session kind is labeled as inferred.
+Event model/reasoning are labeled as bounded head previews, not authoritative live state.
 
 **Prompt previews.** Details shows **First prompt** followed by **Last prompt**. Both use
 nonempty `user.message.data.content` strings, flatten line breaks, and truncate after 2,000
@@ -114,20 +164,18 @@ stored fields it exposes computed **projections**:
 | `Model` / `ReasoningEffort` / `CopilotVersion` / `FirstPromptPreview` | From the `events.jsonl` head (`Start`). |
 | `LastPromptPreview` | From the bounded `events.jsonl` tail scan (`Start.LastUserPrompt`). |
 | `UpdatedAt` | Workspace `updated_at` if known, else folder `LastWriteTime`. |
-| `SnapshotCount` / `Branch` / `JournalActivity` | Best-effort enrichment. |
+| `Branch` | Native `workspace.yaml` branch, falling back to `session.start.data.context.branch` after lazy event loading. |
 
 ### Supporting records
 
 | Type | Shape | Source |
 |------|-------|--------|
 | `SessionKind` (enum) | `Project` \| `Chat` | folder-name prefix |
-| `WorkspaceMetadata` | id, cwd, client_name, name, user-named, summary count, created/updated, remote-steerable, MC ids | `workspace.yaml` |
-| `SessionStartInfo` | copilot version, context tier, producer, start time, cwd, already-in-use, effective model + reasoning effort, first and last user prompts | `events.jsonl` head + bounded tail |
+| `WorkspaceMetadata` | id, cwd, Git root/repository/host/branch, client_name, name, user-named, summary count, created/updated, remote-steerable, MC ids | `workspace.yaml` |
+| `SessionStartInfo` | copilot version, context tier, producer, start time, cwd + Git root/repository/branch, nullable already-in-use, effective model + reasoning effort, first and last user prompts | `events.jsonl` head + bounded tail |
 | `CheckpointInfo` | number, title, file path, timestamp | `checkpoints/` |
-| `SnapshotInfo` | snapshot id, session id, timestamp (raw + parsed), cwd, branch, file path, `SourceTrigger` (`ask_user`/`handoff`/`task_complete`/`long_turn`/`on_demand`/`checkpoint`) | `status-snapshots/index.db` |
 | `SessionTodo` | id, title, description, raw status, created_at and updated_at as stored strings | `session.db` |
 | `SessionTodosResult` | rows, `Status` (`Success`/`MissingDatabase`/`MissingTable`/`UnsupportedSchema`/`Unavailable`), missing fields, message | one explicit todo read |
-| `JournalEntry` | time, session id, branch, cwd, activity | `journal/<YYYY-MM>.md` |
 | `SessionGroup` | `ObservableCollection<SessionInfo>` + `Key` header text | built by `MainViewModel` |
 | `AppSettings` | `UseSharedTerminalWindow`, `RunElevated`, `AppendYolo`, `HideEmptySessions`, `HideUnnamedSessions` | `settings.json` (app-owned, writable) |
 
@@ -179,7 +227,7 @@ Groups and rows are both newest-first. The XAML uses a grouped `CollectionViewSo
 screenshotted with **zero** proprietary information. Shape (locked by unit tests):
 
 - **15 sessions**, exactly **6 detailed** (ids ending 01/03/05/07/09/12).
-- Each detailed session seeds **3 checkpoints**, **3 snapshots** (`SnapshotCount = 3`), **4 todos**
+- Each detailed session seeds **3 checkpoints**, **4 todos**
   (`done`, `done`, `in_progress`, `pending`) with descriptive IDs, synthetic descriptions, and timestamps.
 - Plain (non-detailed) sessions carry no detail collections.
 - Every row sets `HasEvents = IsEnriched = true`, so the default **hide empty sessions** filter never

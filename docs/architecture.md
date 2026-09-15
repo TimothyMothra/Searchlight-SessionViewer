@@ -17,6 +17,8 @@ behind the shape.
    everything else is portable so a future non-Windows front-end could reuse the Core unchanged.
 4. **Responsive on large stores.** A folder scan of hundreds of sessions must stay snappy, so
    heavy per-session parsing is deferred until a row is selected.
+5. **Native Copilot sources only.** No personal journal, status-snapshot index, or custom-hook
+   prerequisite. Optional native fields are shown as unknown when absent.
 
 ---
 
@@ -65,9 +67,9 @@ Windows-only assembly. The host and the tests depend on Core.
 
 | Layer | Types | Responsibility |
 |-------|-------|----------------|
-| **Models** | `SessionInfo`, `SessionGroup`, `SessionKind`, `WorkspaceMetadata`, `SessionStartInfo`, `CheckpointInfo`, `SnapshotInfo`, `SessionTodo`, `JournalEntry`, `AppSettings` | Immutable (mostly `record`) domain data. `SessionInfo` carries computed projections (`DisplayName`, `ShortId`, `ClientLabel`, `UpdatedAt`, …). |
-| **Readers** | `SessionStateScanner`, `WorkspaceYamlReader`, `EventsJsonlReader`, `SnapshotIndexReader`, `JournalReader`, `CheckpointsReader`, `SessionDbReader` | One read-only reader per on-disk source. Todo reads return explicit availability/error states; other readers retain their null-safe empty-result contracts. See [data-model.md](./data-model.md). |
-| **Aggregation** | `SessionAggregator` | Merges scanner + workspace + snapshot-index + journal into the `SessionInfo` list. Splits work into a **cheap bulk pass** (`LoadAll`) and **lazy per-session enrichment** (`EnrichWithEvents`). |
+| **Models** | `SessionInfo`, `SessionGroup`, `SessionKind`, `WorkspaceMetadata`, `SessionStartInfo`, `CheckpointInfo`, `SessionTodo`, `AppSettings` | Immutable (mostly `record`) domain data. `SessionInfo` carries computed projections (`DisplayName`, `ShortId`, `ClientLabel`, `UpdatedAt`, …). |
+| **Readers** | `SessionStateScanner`, `WorkspaceYamlReader`, `EventsJsonlReader`, `CheckpointsReader`, `SessionDbReader` | Read-only readers over native session files. Todo reads return explicit availability/error states; other readers retain their null-safe empty-result contracts. See [data-model.md](./data-model.md). |
+| **Aggregation** | `SessionAggregator` | Combines scanner + native workspace metadata into the `SessionInfo` list. Splits work into a **cheap bulk pass** (`LoadAll`) and **lazy per-session enrichment** (`EnrichWithEvents`), without external enrichment stores. |
 | **Data source façade** | `ISessionDataSource` → `LiveSessionDataSource`, `MockSessionDataSource` | Single seam the view-models talk to. Live composes the aggregator + detail readers; Mock returns 15 synthetic sessions in-memory. |
 | **Abstractions** | `IUiDispatcher`, `IResumeLauncher`, `ISessionWatcher` | Platform seams the host implements. Keep Core free of WinUI/Win32/`Process`. |
 | **View-models** | `MainViewModel`, `DetailsViewModel`, `TodosViewModel` | MVVM (CommunityToolkit.Mvvm). Own the grouped session list, selection, filter, Resume command, and independently activated Todos snapshot. |
@@ -112,9 +114,8 @@ manually (double-dispose). See `App.ExitApplication`.
 
 ```
  ~/.copilot/session-state/<id>/        SessionStateScanner ─┐
-   workspace.yaml                      WorkspaceYamlReader  │  (cheap bulk pass)
- ~/.copilot/status-snapshots/index.db  SnapshotIndexReader  ├─► SessionAggregator.LoadAll()
- ~/.copilot/journal/<YYYY-MM>.md       JournalReader       ─┘        │  IReadOnlyList<SessionInfo>
+   workspace.yaml                      WorkspaceYamlReader ─┴─► SessionAggregator.LoadAll()
+                                                                     │  IReadOnlyList<SessionInfo>
                                                                      ▼
                                             MainViewModel.LoadAsync  (Task.Run, off UI thread)
                                                                      │
@@ -124,13 +125,14 @@ manually (double-dispose). See `App.ExitApplication`.
                                                           ListView (left pane, grouped)
                                                                      │ selection
                                                                      ▼
-                                            DetailsViewModel.Load(session)   ← lazy, per-session:
-                                              • EnrichWithEvents  (events.jsonl head parse)
+                                            DetailsViewModel.Load(session)   ← default Details tab:
+                                              • EnrichWithEvents  (events.jsonl head + tail previews)
+                                            Open Checkpoints tab:
                                               • ReadCheckpoints   (checkpoints/*.md)
-                                              • LoadSnapshots     (status-snapshots index.db)
                                                                      │
                                                                      ▼
-                                                        Details tab + shared Resume button
+                                                        Details / Checkpoints tabs
+                                                          + shared Resume button
 
                                             Explicitly select Todos / click its Refresh
                                                                      │
@@ -144,7 +146,7 @@ manually (double-dispose). See `App.ExitApplication`.
 
 **Summary and detail loading (performance):**
 
-- **Catalog (`LoadCheap`)** discovers all folders and refreshes snapshot/journal summaries.
+- **Catalog (`LoadCheap`)** discovers all folders using native workspace summaries.
   Unchanged session summaries are reused from an in-memory cache. Folder timestamps, workspace
   timestamps/lengths, and checkpoint-directory timestamps invalidate changed summaries; deleted
   folders are evicted. The cache is not persisted to Copilot's data directory.
@@ -161,12 +163,22 @@ manually (double-dispose). See `App.ExitApplication`.
   overlap, but use of the shared deserializer is serialized.
 - **Filtering** uses in-memory metadata and a note-presence index loaded once per refresh.
   Unchanged groups/rows are retained, and filtering an unchanged selection does not reload details.
-- **Details** load asynchronously through `SessionDetailsLoader`, with a serial worker and an
-  **eight-entry LRU cache**. Event/workspace/checkpoint/snapshot (including snapshot-index WAL) versions are checked
-  on selection or explicit refresh. Inputs that change during a read are not cached. Superseded
-  selections cancel queued work and cannot publish stale results. Resume/copy remain available
-  while details load. General details never read `session.db`.
-- **Agent tasks** (the `todos` table) live on the second tab beneath the shared session header. Every explicit activation
+- **Section details** load asynchronously through `SessionDetailsLoader`, with a serial worker and an
+  **eight-entry LRU cache shared across session/section keys**. Only the active tab's reader
+  and version probes run. Details checks workspace/events; Checkpoints checks its directory
+  and Markdown files (including edits in place).
+  Switching tabs or explicitly refreshing validates just that section's cache; hidden sections
+  wait until opened. Inputs that change during a read are not cached. Superseded selections
+  and tab switches cancel queued work and cannot publish stale results. Resume/copy remain
+  available while sections load. These two tabs never read `session.db`.
+- **Section tabs** split native metadata into Details, tasks into Agent tasks, and checkpoint
+  summaries into Checkpoints, in that order. The latter two start with explanatory text and
+  load only when opened. Checkpoint empty messages depend on successfully loaded collections
+  and stay hidden before activation, during loading, or after a load failure. File last-modified
+  times show full local date/time with UTC offset. Details uses an I/O-free, explicit metadata
+  display allowlist grouped by native source; absent booleans/counts are not fabricated as false/zero.
+- **Agent tasks** (the `todos` table) live on the second tab beneath the shared session header,
+  with an introductory paragraph explaining the read-only work list. Every explicit activation
   and its dedicated **Refresh** action reads a fresh snapshot off-thread; there is no polling,
   watcher/global-refresh read, or todo LRU cache. Switching to another session resets to Details.
   Same-session metadata refreshes preserve the selected tab and snapshot. Cancellation and a

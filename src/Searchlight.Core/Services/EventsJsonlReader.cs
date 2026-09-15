@@ -68,7 +68,8 @@ public sealed class EventsJsonlReader
         string? producer = null;
         DateTimeOffset? startTime = null;
         string? cwd = null;
-        bool alreadyInUse = false;
+        string? branch = null, gitRoot = null, repository = null;
+        bool? alreadyInUse = null;
         string? model = null;
         string? reasoningEffort = null;
         string? firstPrompt = null;
@@ -103,7 +104,7 @@ public sealed class EventsJsonlReader
                             ParseStart(
                                 root, ref copilotVersion, ref contextTier, ref producer,
                                 ref startTime, ref cwd, ref alreadyInUse, ref model,
-                                ref reasoningEffort);
+                                ref reasoningEffort, ref branch, ref gitRoot, ref repository);
                             haveStart = true;
                             break;
 
@@ -136,6 +137,9 @@ public sealed class EventsJsonlReader
             Producer = producer,
             StartTime = startTime,
             Cwd = cwd,
+            Branch = branch,
+            GitRoot = gitRoot,
+            Repository = repository,
             AlreadyInUse = alreadyInUse,
             Model = model,
             ReasoningEffort = reasoningEffort,
@@ -218,7 +222,8 @@ public sealed class EventsJsonlReader
     private static void ParseStart(
         JsonElement root, ref string? copilotVersion, ref string? contextTier,
         ref string? producer, ref DateTimeOffset? startTime, ref string? cwd,
-        ref bool alreadyInUse, ref string? model, ref string? reasoningEffort)
+        ref bool? alreadyInUse, ref string? model, ref string? reasoningEffort,
+        ref string? branch, ref string? gitRoot, ref string? repository)
     {
         // session.start places its fields directly under "data".
         JsonElement data = root.TryGetProperty("data", out JsonElement d) ? d : root;
@@ -226,7 +231,10 @@ public sealed class EventsJsonlReader
         copilotVersion = GetString(data, "copilotVersion") ?? copilotVersion;
         contextTier = GetString(data, "contextTier") ?? contextTier;
         producer = GetString(data, "producer") ?? producer;
-        cwd = GetContextCwd(data) ?? cwd;
+        cwd = GetContextString(data, "cwd") ?? cwd;
+        branch = GetContextString(data, "branch") ?? branch;
+        gitRoot = GetContextString(data, "gitRoot") ?? gitRoot;
+        repository = GetContextString(data, "repository") ?? repository;
         model = GetString(data, "selectedModel") ?? model;
         reasoningEffort = GetString(data, "reasoningEffort") ?? reasoningEffort;
 
@@ -378,12 +386,12 @@ public sealed class EventsJsonlReader
         return text.Length > PreviewLength ? text[..PreviewLength] + "\u2026" : text;
     }
 
-    private static string? GetContextCwd(JsonElement data)
+    private static string? GetContextString(JsonElement data, string name)
     {
         if (data.TryGetProperty("context", out JsonElement ctx) &&
             ctx.ValueKind == JsonValueKind.Object)
         {
-            return GetString(ctx, "cwd");
+            return GetString(ctx, name);
         }
 
         return null;
