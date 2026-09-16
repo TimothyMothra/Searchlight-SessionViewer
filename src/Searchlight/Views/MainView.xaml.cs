@@ -150,6 +150,8 @@ public sealed partial class MainView : UserControl
 
     private async void OnSettingsClick(object sender, RoutedEventArgs e)
     {
+        if (TryCloseApplicationPane(SettingsButton)) return;
+
         ViewModel.Settings.Reload();
         ShowApplicationPane(isSettings: true);
         if (ShowStartupSetting) await Startup.LoadAsync();
@@ -162,7 +164,22 @@ public sealed partial class MainView : UserControl
             await Startup.SetEnabledAsync(toggle.IsOn);
     }
 
-    private void OnInformationClick(object sender, RoutedEventArgs e) => ShowApplicationPane(isSettings: false);
+    private void OnInformationClick(object sender, RoutedEventArgs e)
+    {
+        if (TryCloseApplicationPane(InformationButton)) return;
+
+        ShowApplicationPane(isSettings: false);
+    }
+
+    private bool TryCloseApplicationPane(Button sourceButton)
+    {
+        // ASSUMPTION: only the active pane's icon toggles Home; the other icon switches panes.
+        if (ApplicationPane.Visibility != Visibility.Visible || _paneSourceButton != sourceButton)
+            return false;
+
+        ReturnToSessions();
+        return true;
+    }
 
     private void ShowApplicationPane(bool isSettings)
     {
@@ -177,6 +194,8 @@ public sealed partial class MainView : UserControl
         PaneTitle.Text = isSettings ? "Settings" : "Information";
         _paneSourceButton = isSettings ? SettingsButton : InformationButton;
         ApplicationPane.Visibility = Visibility.Visible;
+        // ASSUMPTION: the active icon retains the theme's hover background until navigation changes.
+        VisualStateManager.GoToState(this, isSettings ? "SettingsVisible" : "InformationVisible", false);
         BackButton.Focus(FocusState.Programmatic);
     }
 
@@ -199,6 +218,7 @@ public sealed partial class MainView : UserControl
         SessionSearchBar.Visibility = Visibility.Visible;
         SessionContent.Visibility = Visibility.Visible;
         SessionStatusBar.Visibility = Visibility.Visible;
+        VisualStateManager.GoToState(this, "SessionsVisible", false);
         _paneSourceButton?.Focus(FocusState.Programmatic);
     }
 

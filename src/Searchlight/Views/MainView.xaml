@@ -19,6 +19,23 @@
     </UserControl.Resources>
 
     <Grid x:Name="RootGrid">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="ApplicationPaneStates">
+                <VisualState x:Name="SessionsVisible" />
+                <VisualState x:Name="SettingsVisible">
+                    <VisualState.Setters>
+                        <Setter Target="SettingsButton.Background"
+                                Value="{ThemeResource ButtonBackgroundPointerOver}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="InformationVisible">
+                    <VisualState.Setters>
+                        <Setter Target="InformationButton.Background"
+                                Value="{ThemeResource ButtonBackgroundPointerOver}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />

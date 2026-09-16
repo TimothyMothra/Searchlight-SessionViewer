@@ -296,10 +296,13 @@ replacing the search bar, session list/details/notes, and session status footer 
 a popup. Both panes scroll vertically as needed; text wraps without horizontal scrolling.
 Settings retain their existing immediate auto-save and live-filter behavior.
 
-**Back** or **Escape** returns to the existing session view without recreating its controls,
+**Back**, **Escape**, or clicking the active pane's titlebar icon again returns to the existing
+session view without recreating its controls,
 preserving search, selection, notes, and scroll position (subject to live data and filter updates).
-The titlebar buttons can switch directly between panes; keyboard focus moves to Back on entry
+Clicking the other titlebar icon switches directly between panes; keyboard focus moves to Back on entry
 and returns to the corresponding titlebar button on exit.
+The active pane's icon keeps the theme's hover background while that pane is visible.
+The highlight moves when switching panes and clears when returning to the session view.
 The Escape accelerator's automatic key-tip tooltip is hidden; the shortcut still works.
 
 Information starts with the app title, a combined version-and-channel line, subtitle, and
