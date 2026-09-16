@@ -78,6 +78,7 @@ public sealed partial class MainView : UserControl
 
     private Button? _paneSourceButton;
     private DetailsRenderMonitor? _detailsRenderMonitor;
+    private PaneNavigationMonitor? _paneNavigationMonitor;
     private string? _detailsSessionId;
     private string? _detailsSessionPath;
 
@@ -92,6 +93,7 @@ public sealed partial class MainView : UserControl
     {
         ViewModel = viewModel;
         _detailsRenderMonitor = new DetailsRenderMonitor(DispatcherQueue);
+        _paneNavigationMonitor = new PaneNavigationMonitor(DispatcherQueue);
         InitializeComponent();
         ViewModel.Details.PropertyChanged += OnDetailsPropertyChanged;
         Loaded += OnViewLoaded;
@@ -109,13 +111,18 @@ public sealed partial class MainView : UserControl
         SessionList.ItemsSource = groupedSource.View;
     }
 
-    private void OnViewLoaded(object sender, RoutedEventArgs e) =>
+    private void OnViewLoaded(object sender, RoutedEventArgs e)
+    {
         _detailsRenderMonitor ??= new DetailsRenderMonitor(DispatcherQueue);
+        _paneNavigationMonitor ??= new PaneNavigationMonitor(DispatcherQueue);
+    }
 
     private void OnViewUnloaded(object sender, RoutedEventArgs e)
     {
         _detailsRenderMonitor?.Dispose();
         _detailsRenderMonitor = null;
+        _paneNavigationMonitor?.Dispose();
+        _paneNavigationMonitor = null;
     }
 
     private void OnDetailsPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -152,9 +159,24 @@ public sealed partial class MainView : UserControl
     {
         if (TryCloseApplicationPane(SettingsButton)) return;
 
-        ViewModel.Settings.Reload();
+        var timing = BeginPaneNavigation("Settings", "icon", SettingsPane);
+        long reloadStarted = timing?.StartPhase() ?? 0;
+        bool reloaded = ViewModel.Settings.Reload();
+        timing?.RecordPhase("settings_reload", reloadStarted, reloaded ? "completed" : "failed");
+        long navigationStarted = timing?.StartPhase() ?? 0;
         ShowApplicationPane(isSettings: true);
-        if (ShowStartupSetting) await Startup.LoadAsync();
+        timing?.RecordPhase("navigation", navigationStarted);
+        if (ShowStartupSetting)
+        {
+            bool wasBusy = Startup.IsBusy;
+            long startupStarted = timing?.StartPhase() ?? 0;
+            var load = Startup.LoadAsync();
+            // ASSUMPTION: an async API may perform COM/file work before returning its Task.
+            timing?.RecordPhase("startup_load_sync", startupStarted, wasBusy ? "skipped_busy" : "completed");
+            await load;
+            timing?.RecordPhase("startup_load_total", startupStarted, wasBusy ? "skipped_busy" : "completed");
+        }
+        timing?.CompleteWork();
     }
 
     private async void OnStartupToggled(object sender, RoutedEventArgs e)
@@ -168,7 +190,18 @@ public sealed partial class MainView : UserControl
     {
         if (TryCloseApplicationPane(InformationButton)) return;
 
+        var timing = BeginPaneNavigation("Information", "icon", InformationPane);
+        long navigationStarted = timing?.StartPhase() ?? 0;
         ShowApplicationPane(isSettings: false);
+        timing?.RecordPhase("navigation", navigationStarted);
+        timing?.CompleteWork();
+    }
+
+    private PaneNavigationMonitor.Measurement? BeginPaneNavigation(string destination, string trigger, FrameworkElement target)
+    {
+        string source = ApplicationPane.Visibility != Visibility.Visible ? "Home"
+            : SettingsPane.Visibility == Visibility.Visible ? "Settings" : "Information";
+        return _paneNavigationMonitor?.Begin(source, destination, trigger, target);
     }
 
     private bool TryCloseApplicationPane(Button sourceButton)
@@ -177,7 +210,7 @@ public sealed partial class MainView : UserControl
         if (ApplicationPane.Visibility != Visibility.Visible || _paneSourceButton != sourceButton)
             return false;
 
-        ReturnToSessions();
+        ReturnToSessions("icon");
         return true;
     }
 
@@ -199,19 +232,21 @@ public sealed partial class MainView : UserControl
         BackButton.Focus(FocusState.Programmatic);
     }
 
-    private void OnBackClick(object sender, RoutedEventArgs e) => ReturnToSessions();
+    private void OnBackClick(object sender, RoutedEventArgs e) => ReturnToSessions("back");
 
     private void OnPaneEscape(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         if (ApplicationPane.Visibility == Visibility.Visible)
         {
-            ReturnToSessions();
+            ReturnToSessions("escape");
             args.Handled = true;
         }
     }
 
-    private void ReturnToSessions()
+    private void ReturnToSessions(string trigger)
     {
+        var timing = BeginPaneNavigation("Home", trigger, SessionContent);
+        long navigationStarted = timing?.StartPhase() ?? 0;
         ApplicationPane.Visibility = Visibility.Collapsed;
         SettingsPane.Visibility = Visibility.Collapsed;
         InformationPane.Visibility = Visibility.Collapsed;
@@ -220,6 +255,8 @@ public sealed partial class MainView : UserControl
         SessionStatusBar.Visibility = Visibility.Visible;
         VisualStateManager.GoToState(this, "SessionsVisible", false);
         _paneSourceButton?.Focus(FocusState.Programmatic);
+        timing?.RecordPhase("navigation", navigationStarted);
+        timing?.CompleteWork();
     }
 
     private void OnSessionDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)

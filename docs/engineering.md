@@ -189,6 +189,43 @@ Enabled runs write to `%TEMP%\Searchlight.<channel>.log` (`Dev`, `Production`, o
 `Unpackaged`) through the shared `CoreLog`/host sink. A healthy live launch logs
 `published NNN rows in MM groups (total NNN)`; a mock launch logs `data source returned 15 sessions`.
 
+### Pane navigation measurements
+
+With monitoring enabled, `PaneNavigation` entries in `%TEMP%\Searchlight.Production.log`
+correlate Settings, Information, and Home transitions by `process`, `request`, `from`, `to`, and
+`trigger` (`icon`, `back`, or `escape`). `visit` and `first_visit` distinguish first
+activation from repeat visits within the current view lifetime, including visits made
+before monitoring was enabled. Home starts with one visit.
+
+- `settings_reload`: synchronous settings file/lock/merge work before opening Settings;
+  `outcome=failed` indicates reload failure (the normal persistence notice supplies details).
+- `navigation`: visibility, active-icon state, and focus updates.
+- `startup_load_sync`: time until the startup-state API returns its Task, including
+  synchronous COM/shortcut/registry work in unpackaged Production.
+- `startup_load_total`: elapsed time through completion of that Task, including the
+  synchronous part. `skipped_busy` means an existing startup operation prevented a new read.
+  Completion is not proof of successful OS access; startup errors retain their existing log/message.
+- `handler`: elapsed time through completion of navigation and any awaited startup load.
+- `render`: first post-request layout observation with a visible, nonzero target size,
+  followed by the next XAML render tick; includes dimensions and layout callback count.
+  These timestamps share the request origin, overlap the handler phases, and do not prove
+  GPU presentation.
+
+To investigate cold navigation, enable monitoring before restarting Searchlight, then
+open Settings, Information, and Settings again. Compare `first_visit=True` to repeat
+visits. A slow `startup_load_sync` suggests UI-thread startup-state work; a slow
+`settings_reload` suggests settings I/O/locking; cheap handler phases with a slow render
+tick suggest layout/render scheduling. Entries are buffered until the render timestamp
+or cancellation/timeout, keeping synchronous log-file writes outside the first-render
+measurement. `started_at` is the request time; the log-line timestamp is the flush time.
+Observer setup and formatting still add some overhead.
+No preference values, session data, or shortcut targets are added to these entries.
+
+Render observers detach after one sample, navigation supersession, unload, monitoring
+opt-out, or a five-second dispatcher timeout. Cancellation/timeout outcomes are explicit
+when monitoring is still enabled; opted-out transitions create no timers/render observers
+and write no diagnostics. The dispatcher timeout is not a watchdog for a blocked UI thread.
+
 ### Details rendering measurements
 
 - `DetailsRead`: request counter, section, cache hit, semaphore queue wait, and worker-phase
