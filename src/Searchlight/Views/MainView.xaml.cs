@@ -160,23 +160,35 @@ public sealed partial class MainView : UserControl
         if (TryCloseApplicationPane(SettingsButton)) return;
 
         var timing = BeginPaneNavigation("Settings", "icon", SettingsPane);
-        long reloadStarted = timing?.StartPhase() ?? 0;
-        bool reloaded = ViewModel.Settings.Reload();
-        timing?.RecordPhase("settings_reload", reloadStarted, reloaded ? "completed" : "failed");
+        long dispatchStarted = timing?.StartPhase() ?? 0;
         long navigationStarted = timing?.StartPhase() ?? 0;
         ShowApplicationPane(isSettings: true);
         timing?.RecordPhase("navigation", navigationStarted);
-        if (ShowStartupSetting)
-        {
-            bool wasBusy = Startup.IsBusy;
-            long startupStarted = timing?.StartPhase() ?? 0;
-            var load = Startup.LoadAsync();
-            // ASSUMPTION: an async API may perform COM/file work before returning its Task.
-            timing?.RecordPhase("startup_load_sync", startupStarted, wasBusy ? "skipped_busy" : "completed");
-            await load;
-            timing?.RecordPhase("startup_load_total", startupStarted, wasBusy ? "skipped_busy" : "completed");
-        }
+        // Show cached values first; both refreshes apply results on this UI context.
+        Task settings = ReloadPaneSettingsAsync(timing);
+        Task startup = ShowStartupSetting ? LoadPaneStartupAsync(timing) : Task.CompletedTask;
+        timing?.RecordPhase("dispatch", dispatchStarted);
+        await Task.WhenAll(settings, startup);
         timing?.CompleteWork();
+    }
+
+    private async Task ReloadPaneSettingsAsync(PaneNavigationMonitor.Measurement? timing)
+    {
+        long started = timing?.StartPhase() ?? 0;
+        var reload = ViewModel.Settings.ReloadAsync();
+        timing?.RecordPhase("settings_reload_sync", started);
+        bool reloaded = await reload;
+        timing?.RecordPhase("settings_reload", started, reloaded ? "completed" : "failed");
+    }
+
+    private async Task LoadPaneStartupAsync(PaneNavigationMonitor.Measurement? timing)
+    {
+        bool wasBusy = Startup.IsBusy;
+        long started = timing?.StartPhase() ?? 0;
+        var load = Startup.LoadAsync();
+        timing?.RecordPhase("startup_load_sync", started, wasBusy ? "skipped_busy" : "completed");
+        await load;
+        timing?.RecordPhase("startup_load_total", started, wasBusy ? "skipped_busy" : "completed");
     }
 
     private async void OnStartupToggled(object sender, RoutedEventArgs e)

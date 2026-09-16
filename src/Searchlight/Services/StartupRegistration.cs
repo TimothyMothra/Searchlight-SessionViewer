@@ -21,7 +21,27 @@ internal sealed class StartupRegistration : IStartupRegistration
             return FromTaskState((await StartupTask.GetAsync(TaskId)).State);
         if (!string.Equals(Environment.ProcessPath, InstalledExe, StringComparison.OrdinalIgnoreCase))
             return new(false, false, "Install Searchlight before configuring auto-start.");
-        return ReadShortcutState();
+        return await ReadShortcutStateAsync();
+    }
+
+    private static Task<StartupRegistrationState> ReadShortcutStateAsync()
+    {
+        var completion = new TaskCompletionSource<StartupRegistrationState>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        // ASSUMPTION: WScript.Shell is apartment-threaded. Create, use, and release
+        // its COM objects on a worker STA, never through the UI apartment.
+        var worker = new Thread(() =>
+        {
+            try { completion.SetResult(ReadShortcutState()); }
+            catch (Exception ex) { completion.SetException(ex); }
+        })
+        {
+            IsBackground = true,
+            Name = "Searchlight startup-state reader",
+        };
+        worker.SetApartmentState(ApartmentState.STA);
+        worker.Start();
+        return completion.Task;
     }
 
     public async Task<StartupRegistrationState> SetEnabledAsync(bool enabled)

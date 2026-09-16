@@ -7,6 +7,27 @@ namespace Searchlight.Core.Tests;
 public sealed class StartupSettingsTests
 {
     [Fact]
+    public async Task RepeatedLoadsDoNotOverlapOrReenableControlsBeforeReadCompletes()
+    {
+        var pending = new TaskCompletionSource<StartupRegistrationState>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var registration = new FakeRegistration { PendingRead = pending.Task };
+        var vm = new StartupSettingsViewModel(registration);
+
+        Task first = vm.LoadAsync();
+        await vm.LoadAsync();
+        Assert.Equal(1, registration.Reads);
+        Assert.True(vm.IsBusy);
+        Assert.False(vm.CanChange);
+
+        pending.SetResult(new(true, true));
+        await first;
+        Assert.True(vm.CanChange);
+        Assert.True(vm.IsEnabled);
+        Assert.False(vm.IsBusy);
+    }
+
+    [Fact]
     public async Task LoadingAndRefreshingReflectOsStateWithoutWriting()
     {
         var registration = new FakeRegistration { State = new(true, true) };
@@ -105,8 +126,13 @@ public sealed class StartupSettingsTests
         public StartupRegistrationState? WriteResult;
         public Task<StartupRegistrationState>? PendingRead;
         public int Writes;
+        public int Reads;
         public bool FailWrite;
-        public Task<StartupRegistrationState> GetStateAsync() => PendingRead ?? Task.FromResult(State);
+        public Task<StartupRegistrationState> GetStateAsync()
+        {
+            Reads++;
+            return PendingRead ?? Task.FromResult(State);
+        }
         public Task<StartupRegistrationState> SetEnabledAsync(bool enabled)
         {
             if (FailWrite) throw new UnauthorizedAccessException("access denied");

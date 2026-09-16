@@ -33,6 +33,26 @@ public sealed class MonitoringTests : IDisposable
         Assert.Equal(expected, MonitoringPolicy.IsEnabled(channel, preference));
 
     [Fact]
+    public async Task AsyncReloadAppliesMonitoringBeforeOtherFields()
+    {
+        string path = WriteSettings("""{"EnableMonitoring":true}""");
+        var service = new SettingsService(path);
+        List<string?> changes = [];
+        service.Current.PropertyChanged += (_, e) =>
+        {
+            Assert.True(service.IsReloading);
+            changes.Add(e.PropertyName);
+        };
+        File.WriteAllText(path, """{"EnableMonitoring":false,"RunElevated":true}""");
+
+        Assert.True(await service.ReloadAsync());
+        Assert.False(service.Current.EnableMonitoring);
+        Assert.True(service.Current.RunElevated);
+        Assert.Equal(nameof(AppSettings.EnableMonitoring), changes[0]);
+        Assert.False(service.IsReloading);
+    }
+
+    [Fact]
     public void SinkGatesWritesAndNotifiesOnlyOnEnabledTransitions()
     {
         List<string> messages = [];

@@ -197,15 +197,19 @@ correlate Settings, Information, and Home transitions by `process`, `request`, `
 activation from repeat visits within the current view lifetime, including visits made
 before monitoring was enabled. Home starts with one visit.
 
-- `settings_reload`: synchronous settings file/lock/merge work before opening Settings;
+- `settings_reload_sync`: time to dispatch the asynchronous settings refresh.
+- `settings_reload`: total settings file/lock/merge refresh time, including worker
+  scheduling and UI-context application, after showing cached settings;
   `outcome=failed` indicates reload failure (the normal persistence notice supplies details).
 - `navigation`: visibility, active-icon state, and focus updates.
-- `startup_load_sync`: time until the startup-state API returns its Task, including
-  synchronous COM/shortcut/registry work in unpackaged Production.
+- `startup_load_sync`: time until the startup-state API returns its Task. Unpackaged
+  Production dispatches COM/shortcut/registry reads to a background STA.
 - `startup_load_total`: elapsed time through completion of that Task, including the
   synchronous part. `skipped_busy` means an existing startup operation prevented a new read.
   Completion is not proof of successful OS access; startup errors retain their existing log/message.
-- `handler`: elapsed time through completion of navigation and any awaited startup load.
+- `dispatch`: synchronous time to show Settings and start both refreshes.
+- `handler`: elapsed time through completion of navigation and both awaited refreshes;
+  this can finish after the first render and is not UI-thread blocking time.
 - `render`: first post-request layout observation with a visible, nonzero target size,
   followed by the next XAML render tick; includes dimensions and layout callback count.
   These timestamps share the request origin, overlap the handler phases, and do not prove
@@ -213,8 +217,9 @@ before monitoring was enabled. Home starts with one visit.
 
 To investigate cold navigation, enable monitoring before restarting Searchlight, then
 open Settings, Information, and Settings again. Compare `first_visit=True` to repeat
-visits. A slow `startup_load_sync` suggests UI-thread startup-state work; a slow
-`settings_reload` suggests settings I/O/locking; cheap handler phases with a slow render
+visits. A slow `startup_load_sync` suggests UI-thread startup-state dispatch work; a slow
+`settings_reload` suggests settings I/O/locking or refresh scheduling/application. Cheap
+navigation/dispatch phases with a slow render
 tick suggest layout/render scheduling. Entries are buffered until the render timestamp
 or cancellation/timeout, keeping synchronous log-file writes outside the first-render
 measurement. `started_at` is the request time; the log-line timestamp is the flush time.
@@ -332,6 +337,15 @@ button, separate from its draggable label region. Each opens a full-size pane be
 replacing the search bar, session list/details/notes, and session status footer rather than opening
 a popup. Both panes scroll vertically as needed; text wraps without horizontal scrolling.
 Settings retain their existing immediate auto-save and live-filter behavior.
+The pane opens from in-memory settings immediately, then refreshes shared settings and
+Windows auto-start state independently in the background. File reads/parsing run on a
+worker; merges and bound-property notifications stay on the UI context. Concurrent
+settings refreshes share one read loop, and any save or synchronous reload during an
+in-flight read invalidates that snapshot so newer local changes cannot be undone.
+Unpackaged auto-start reads use a dedicated background STA for apartment-threaded
+`WScript.Shell` COM objects. The auto-start toggle remains disabled while its state is
+being refreshed. Leaving the pane does not cancel the shared-state refresh; existing
+persistence notices and startup error messages still report failures.
 
 **Back**, **Escape**, or clicking the active pane's titlebar icon again returns to the existing
 session view without recreating its controls,

@@ -15,6 +15,8 @@ public sealed class SettingsService
     private readonly string? _path;
     private readonly SharedStatePaths? _paths;
     private AppSettings _observed = new();
+    private long _revision;
+    private Task<bool>? _reloadTask;
 
     public AppSettings Current { get; } = new();
     /// <summary>True while external values are applied; hosts must not restart on elevation changes then.</summary>
@@ -47,17 +49,13 @@ public sealed class SettingsService
     /// <summary>Loads other instances' changes without discarding locally unsaved edits.</summary>
     public bool Reload()
     {
+        _revision++;
         if (_path is null) return true;
         try
         {
-            _paths?.MigrateLegacy();
-            AppSettings merged;
-            using (SharedStateIO.Lock(Path.GetDirectoryName(_path)!))
-            {
-                var (_, disk) = Read();
-                merged = Merge(_observed, Current, disk);
-                _observed = Clone(disk);
-            }
+            var disk = ReadSnapshot();
+            var merged = Merge(_observed, Current, disk);
+            _observed = Clone(disk);
             // Bound property callbacks can read notes or save another preference;
             // release the cross-process lock before notifying any UI observers.
             Apply(merged);
@@ -70,9 +68,51 @@ public sealed class SettingsService
         }
     }
 
+    /// <summary>Reads off-thread, then merges and notifies on the calling UI context.</summary>
+    public Task<bool> ReloadAsync()
+    {
+        if (_reloadTask is { IsCompleted: false }) return _reloadTask;
+        return _reloadTask = ReloadFromDiskAsync();
+    }
+
+    private async Task<bool> ReloadFromDiskAsync()
+    {
+        if (_path is null) return true;
+        while (true)
+        {
+            long revision = _revision;
+            try
+            {
+                var disk = await Task.Run(ReadSnapshot);
+                // ASSUMPTION: the UI owns Current. A save/reload during this read
+                // invalidates the snapshot; retry rather than undoing newer edits.
+                if (revision != _revision) continue;
+                var merged = Merge(_observed, Current, disk);
+                _observed = Clone(disk);
+                _revision++;
+                Apply(merged);
+                return true;
+            }
+            catch (Exception ex) when (IsStorageError(ex))
+            {
+                if (revision != _revision) continue;
+                Report($"Could not reload shared settings at {_path}. Existing data was not replaced.", ex);
+                return false;
+            }
+        }
+    }
+
+    private AppSettings ReadSnapshot()
+    {
+        _paths?.MigrateLegacy();
+        using var gate = SharedStateIO.Lock(Path.GetDirectoryName(_path!)!);
+        return Read().Settings;
+    }
+
     /// <summary>Saves changed scalars and individual pin/name edits; returns false with a persistent notice on failure.</summary>
     public bool Save()
     {
+        _revision++;
         if (_path is null) return true;
         try
         {
