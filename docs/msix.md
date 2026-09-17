@@ -114,6 +114,34 @@ below for a single multi-architecture distribution file; hosted update feeds rem
 
 ### One MSIXBUNDLE for x64 and ARM64
 
+**Repository default for bundle requests:** build an **unsigned Production** candidate
+containing **x64 + ARM64**, using `TimothyMothra.Searchlight` and
+`CN=Production Placeholder`. This matches the established bundle workflow; Dev remains
+an explicit, separate single-package testing workflow. Do not ask for the channel/signing
+choice again unless the user requests a change.
+
+Use the current release's build name when the source matches an already-built local release;
+otherwise allocate one shared name. For example:
+
+```powershell
+$buildName = .\tools\Get-NextBuildVersion.ps1
+$x64 = .\tools\Build-Msix.ps1 -Channel Production -Architecture x64 `
+    -PackageName TimothyMothra.Searchlight -Publisher 'CN=Production Placeholder' `
+    -BuildName $buildName -Unsigned
+$arm64 = .\tools\Build-Msix.ps1 -Channel Production -Architecture arm64 `
+    -PackageName TimothyMothra.Searchlight -Publisher 'CN=Production Placeholder' `
+    -BuildName $buildName -Unsigned
+$version = ([version]$buildName).ToString()
+$output = ".\artifacts\msix\Production\$version\Searchlight_${version}_x64_arm64.msixbundle"
+.\tools\Bundle-Msix.ps1 -X64Package $x64.Path -Arm64Package $arm64.Path `
+    -OutputPath $output -Unsigned
+```
+
+Return the full absolute bundle path. The placeholder publisher and lack of a signature
+make this a candidate for the existing signing/distribution workflow, not a trusted,
+normally installable release. Do not create/trust certificates, install, or upload it
+merely because a bundle was requested. Individual Dev package commands above are unchanged.
+
 Build both packages with identical package name, publisher, and release version, then:
 
 ```powershell

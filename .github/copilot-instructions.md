@@ -33,3 +33,18 @@ Key invariants (see docs for detail):
 - Verify the package identity/version and that the installed executable, assembly, and
   `resources.pri` match the MSIX payload (`Searchlight.pri` for unpackaged installs).
   Report installation blockers plainly rather than implying the running app has been updated.
+
+## Default MSIX bundle preferences
+
+- A request for a new **MSIXBUNDLE** means an **unsigned Production** bundle containing
+  **x64 and ARM64** Release packages. Do not default to Dev or ask for the channel again.
+- Use package name **`TimothyMothra.Searchlight`** and publisher
+  **`CN=Production Placeholder`**, matching the established bundles, unless the user
+  explicitly requests a different identity or signing arrangement.
+- Reuse the current release's build name when packaging the same source already built
+  locally; otherwise allocate one new name and use it for both architectures.
+- Save to `artifacts\msix\Production\<numeric-version>\Searchlight_<numeric-version>_x64_arm64.msixbundle`
+  and provide the full absolute path when ready.
+- Validate both packages and the completed bundle. Report it as an unsigned candidate;
+  these defaults do not establish publisher trust, authorize certificate changes,
+  install the bundle, or publish/upload it.
