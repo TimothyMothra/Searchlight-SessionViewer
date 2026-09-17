@@ -151,6 +151,11 @@ manually (double-dispose). See `App.ExitApplication`.
   Unchanged session summaries are reused from an in-memory cache. Folder timestamps, workspace
   timestamps/lengths, and checkpoint-directory timestamps invalidate changed summaries; deleted
   folders are evicted. The cache is not persisted to Copilot's data directory.
+  Catalog metadata probes use at most **four concurrent readers**, including overlapping
+  scanner calls. Filesystem and ownership checks run outside the global cache lock;
+  per-folder coordination protects publication and prevents evicted state from being
+  reinserted by an older read. Cold discovery still skips YAML parsing and per-folder file
+  enumeration. Results remain newest-first, with ordinal folder-path ordering for timestamp ties.
   Lock paths are cached with summaries, but live ownership is rechecked on cache hits: process
   exit is independent of file versions. The watcher checks confirmed owners every 10 seconds
   and reloads only when confirmation is lost, not on every timer tick.
@@ -170,6 +175,9 @@ manually (double-dispose). See `App.ExitApplication`.
   The compact tag pane beside Search combines In use/CLI/App toggles with AND before text search.
   Choices are transient and do not read files. With a tag enabled, each summary batch
   reconciles membership so newly known matches appear without waiting for the entire catalog.
+  Group reconciliation uses session IDs to remove, insert, and move rows individually,
+  replacing only changed summaries (or explicitly refreshed mutable row flags). Surviving
+  row instances are retained; filtering and progressive regrouping never emit a group Reset.
 - **Section details** load asynchronously through `SessionDetailsLoader`, with a serial worker and an
   **eight-entry LRU cache shared across session/section keys**. Only the active tab's reader
   and version probes run. Details checks workspace/events; Checkpoints checks its directory

@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using Searchlight.Models;
 using Searchlight.Services;
 using Searchlight.ViewModels;
@@ -134,6 +135,41 @@ public sealed class MainViewModelTagFilterTests
         Assert.Empty(Visible(vm));
         Assert.True(vm.FilterCli);
         Assert.True(vm.FilterInUse);
+    }
+
+    [Fact]
+    public async Task ProgressiveTagEnrichmentAndSearch_PreserveGroupsWithoutResets()
+    {
+        SessionInfo[] rows = Enumerable.Range(0, 70)
+            .Select(i => Session($"s{i}", "github/cli", true)).ToArray();
+        var source = new Source(rows) { UsePlaceholders = true };
+        using var vm = Create(source);
+        vm.FilterCli = true;
+        int resets = 0, additions = 0;
+        SessionGroup? original = null;
+        vm.SessionGroups.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems is null) return;
+            foreach (SessionGroup group in e.NewItems)
+            {
+                original ??= group;
+                group.CollectionChanged += (_, change) =>
+                {
+                    if (change.Action == NotifyCollectionChangedAction.Reset) resets++;
+                    if (change.Action == NotifyCollectionChangedAction.Add) additions++;
+                };
+            }
+        };
+        await vm.LoadCommand.ExecuteAsync(null);
+        Assert.Equal(70, vm.VisibleCount);
+        Assert.Equal(40, additions);
+        Assert.Same(original, Assert.Single(vm.SessionGroups));
+        vm.SearchText = "s6";
+        Assert.Equal(11, vm.VisibleCount);
+        vm.ClearSearchCommand.Execute(null);
+        Assert.Equal(70, vm.VisibleCount);
+        Assert.Same(original, Assert.Single(vm.SessionGroups));
+        Assert.Equal(0, resets);
     }
 
     [Fact]

@@ -1,6 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.ComponentModel;
 
 namespace Searchlight.Models;
 
@@ -35,12 +33,42 @@ public sealed class SessionGroup : ObservableCollection<SessionInfo>
             && this.Zip(sessions).All(pair => ReferenceEquals(pair.First, pair.Second)))
             return;
 
-        // Only filtering/regrouping resets membership. Progressive metadata
-        // enrichment uses indexed replacements to preserve WinUI virtualization.
-        Items.Clear();
-        foreach (SessionInfo session in sessions) Items.Add(session);
-        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
-        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        // ASSUMPTION: native session IDs identify rows across summary replacements.
+        // Preserve surviving containers; a forced Replace refreshes one-time bindings
+        // after mutable pin/name changes without resetting the whole group.
+        HashSet<string> desiredIds = sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        for (int i = Count - 1; i >= 0; i--)
+            if (!desiredIds.Contains(this[i].Id)) RemoveAt(i);
+
+        HashSet<string> currentIds = this.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        for (int i = 0; i < sessions.Count; i++)
+        {
+            SessionInfo desired = sessions[i];
+            if (i >= Count || this[i].Id != desired.Id)
+            {
+                int existingIndex = -1;
+                // New rows need no search through the retained group. Only an
+                // actual reorder scans the suffix for the row to move.
+                if (currentIds.Contains(desired.Id))
+                    for (int j = i + 1; j < Count; j++)
+                        if (this[j].Id == desired.Id)
+                        {
+                            existingIndex = j;
+                            break;
+                        }
+
+                if (existingIndex >= 0) Move(existingIndex, i);
+                else
+                {
+                    Insert(i, desired);
+                    currentIds.Add(desired.Id);
+                    continue;
+                }
+            }
+
+            if (force || !ReferenceEquals(this[i], desired)) this[i] = desired;
+        }
+
+        while (Count > sessions.Count) RemoveAt(Count - 1);
     }
 }
