@@ -284,6 +284,8 @@
                                AutomationProperties.HeadingLevel="Level2" />
                     <TextBlock Text="Search by session name, ID, folder, branch, or prompt. Select a session to see its native Copilot metadata, agent tasks, and checkpoints."
                                TextWrapping="Wrap" />
+                    <TextBlock Text="Use the In use, CLI, and App filter tags beside Search. Sessions must match every enabled tag and the search text. Turn all tags off to remove tag filtering."
+                               TextWrapping="Wrap" />
                     <TextBlock Text="Open the Agent tasks tab to read a fresh snapshot of that session's tasks. Use its Refresh button to update the snapshot."
                                TextWrapping="Wrap" />
                     <TextBlock Text="Pin important sessions, give them recognizable names, and keep session notes. Pinned and renamed sessions stay visible even when hide filters are enabled."
@@ -322,27 +324,55 @@
             </ScrollViewer>
         </Grid>
 
-        <!-- Search + refresh. Both action buttons use the app-wide "<glyph> <label>"
+        <!-- Filters + search + refresh. Both action buttons use the app-wide "<glyph> <label>"
              pattern (see Pin/Rename/Resume) so no control is icon-only. -->
         <Grid x:Name="SessionSearchBar" Grid.Row="2" Padding="16,4,16,8" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
+            <!-- ASSUMPTION: the standard search field is 32px high. Filters size
+                 to their labels; Search receives all remaining toolbar width. -->
+            <Border Grid.Column="0" Height="32" Padding="8,0" VerticalAlignment="Center"
+                    BorderThickness="1" CornerRadius="8"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Filters:" FontSize="12" FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <ToggleButton Content="In use" CornerRadius="12" FontSize="12"
+                                  MinHeight="0" Height="22" Padding="8,0" VerticalAlignment="Center"
+                                  IsChecked="{x:Bind ViewModel.FilterInUse, Mode=TwoWay}"
+                                  AutomationProperties.Name="Filter: In use"
+                                  ToolTipService.ToolTip="Require a live Copilot owner, including idle or waiting background sessions." />
+                    <ToggleButton Content="CLI" CornerRadius="12" FontSize="12"
+                                  MinHeight="0" Height="22" Padding="8,0" VerticalAlignment="Center"
+                                  IsChecked="{x:Bind ViewModel.FilterCli, Mode=TwoWay}"
+                                  AutomationProperties.Name="Filter: CLI"
+                                  ToolTipService.ToolTip="Require the CLI tag." />
+                    <ToggleButton Content="App" CornerRadius="12" FontSize="12"
+                                  MinHeight="0" Height="22" Padding="8,0" VerticalAlignment="Center"
+                                  IsChecked="{x:Bind ViewModel.FilterApp, Mode=TwoWay}"
+                                  AutomationProperties.Name="Filter: App"
+                                  ToolTipService.ToolTip="Require the App tag. CLI and App together match no sessions." />
+                </StackPanel>
+            </Border>
+
             <!-- Loaded handler neutralizes the TextBox's built-in inline delete part,
                  whose bare "x" glyph carries no visible label; the Clear button below
                  replaces it. -->
-            <TextBox Grid.Column="0"
+            <TextBox Grid.Column="1"
                      PlaceholderText="Search name, id, folder, branch, prompt…"
                      Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                      Loaded="OnSearchBoxLoaded"
                      VerticalAlignment="Center"
                      HorizontalAlignment="Stretch" />
 
-            <Button Grid.Column="1"
+            <Button Grid.Column="2"
                     Command="{x:Bind ViewModel.ClearSearchCommand}"
                     Visibility="{x:Bind ViewModel.HasSearchText, Mode=OneWay, Converter={StaticResource BoolToVis}}"
                     VerticalAlignment="Center"
@@ -353,12 +383,12 @@
                 </StackPanel>
             </Button>
 
-            <ProgressRing Grid.Column="2"
+            <ProgressRing Grid.Column="3"
                           IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
                           Width="20" Height="20"
                           VerticalAlignment="Center" />
 
-            <Button Grid.Column="3"
+            <Button Grid.Column="4"
                     Command="{x:Bind ViewModel.RefreshCommand}"
                     VerticalAlignment="Center"
                     ToolTipService.ToolTip="Reload sessions from disk">

@@ -167,6 +167,9 @@ manually (double-dispose). See `App.ExitApplication`.
   overlap, but use of the shared deserializer is serialized.
 - **Filtering** uses in-memory metadata and a note-presence index loaded once per refresh.
   Unchanged groups/rows are retained, and filtering an unchanged selection does not reload details.
+  The compact tag pane beside Search combines In use/CLI/App toggles with AND before text search.
+  Choices are transient and do not read files. With a tag enabled, each summary batch
+  reconciles membership so newly known matches appear without waiting for the entire catalog.
 - **Section details** load asynchronously through `SessionDetailsLoader`, with a serial worker and an
   **eight-entry LRU cache shared across session/section keys**. Only the active tab's reader
   and version probes run. Details checks workspace/events; Checkpoints checks its directory

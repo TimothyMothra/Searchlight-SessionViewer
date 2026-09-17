@@ -173,6 +173,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(HasSearchText))]
     private string _searchText = string.Empty;
 
+    // ASSUMPTION: tag filters are transient, like text search. Every enabled tag
+    // is required; pins/renames exempt only Settings hide filters, not explicit tags.
+    [ObservableProperty]
+    private bool _filterInUse;
+
+    [ObservableProperty]
+    private bool _filterCli;
+
+    [ObservableProperty]
+    private bool _filterApp;
+
+    private bool HasTagFilters => FilterInUse || FilterCli || FilterApp;
+
     /// <summary>
     /// True when the search box holds any text. Drives both the Clear button's
     /// visibility and its command's CanExecute, so the two can never disagree.
@@ -323,6 +336,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     partial void OnSearchTextChanged(string value) => ApplyFilter();
+    partial void OnFilterInUseChanged(bool value) => ApplyFilter();
+    partial void OnFilterCliChanged(bool value) => ApplyFilter();
+    partial void OnFilterAppChanged(bool value) => ApplyFilter();
 
     /// <summary>
     /// Publishes pins and the recent window first, then fills missing searchable
@@ -497,7 +513,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             _suppressSelectionSideEffects = false;
         }
-        Details.Load(SelectedSession);
+        if (HasTagFilters) ApplyFilter();
+        else Details.Load(SelectedSession);
     }
 
     private SessionInfo PrepareRow(SessionInfo row)
@@ -673,10 +690,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         List<SessionInfo> candidates = [.. _all.Where(IsVisibleUnderHideFilters)];
         HiddenCount = _all.Count - candidates.Count;
 
-        IEnumerable<SessionInfo> filtered = candidates;
+        IEnumerable<SessionInfo> filtered = candidates.Where(MatchesTagFilters);
         if (query.Length > 0)
         {
-            filtered = candidates.Where(s => Matches(s, query));
+            filtered = filtered.Where(s => Matches(s, query));
         }
 
         // Explicit newest-first ordering so buckets stay contiguous even when
@@ -760,6 +777,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ReconcileNotesSelection();
         Details.Load(SelectedSession);
     }
+
+    private bool MatchesTagFilters(SessionInfo session) =>
+        (!FilterInUse || session.IsInUse)
+        && (!FilterCli || session.IsCliClient)
+        && (!FilterApp || session.IsAppClient);
 
     private void ReconcileGroups(IReadOnlyList<SessionGroup> desired, bool refreshRows)
     {

@@ -216,7 +216,22 @@ stored fields it exposes computed **projections**:
 
 ## 4. Grouping model (left pane)
 
-`MainViewModel.ApplyFilter()` runs three stages: **hide filters → text search → grouping**.
+`MainViewModel.ApplyFilter()` runs four stages: **hide filters → tag filters → text search → grouping**.
+
+The bordered **Filters:** pane sits inline beside Search in the top toolbar, with its label
+and **In use**, **CLI**, and **App** tags in one row. The filter pane sizes to its labels
+and matches the standard search field's 32px height; Search expands to fill the remaining
+toolbar width. The tags are independent on/off toggles, initially off.
+Every enabled tag must match (**AND**), along with any text search. CLI and App are mutually
+exclusive source tags, so selecting both intentionally produces no matches. All tags off means
+no tag restriction. Unknown metadata does not match a requested tag; newly enriched matching
+rows appear as summary batches arrive. In-use filtering follows the live-owner badge semantics,
+including idle/waiting background owners, and reflects owner changes on catalog refresh.
+
+Tag choices last for the current app run and survive refresh, search clearing, and visits to
+Settings/Information; they are not saved to settings. Pinned/renamed sessions must still match
+explicit tags and search text. The footer's visible count reflects all filters, while
+**hidden (not searched)** continues to count only the Settings hide filters described below.
 
 ### 4a. Hide filters (before search)
 
