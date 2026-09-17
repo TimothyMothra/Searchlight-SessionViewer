@@ -1,13 +1,11 @@
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using Searchlight.Abstractions;
-using Windows.ApplicationModel;
 
 namespace Searchlight.Services;
 
 internal sealed class StartupRegistration : IStartupRegistration
 {
-    private const string TaskId = "SearchlightStartup";
     private static string ShortcutPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Searchlight.lnk");
     private static string InstalledExe => Path.Combine(
@@ -18,7 +16,7 @@ internal sealed class StartupRegistration : IStartupRegistration
         if (AppIdentity.Channel != "Production")
             return new(false, false, "Auto-start is available only in Production.");
         if (AppIdentity.IsPackaged)
-            return FromTaskState((await StartupTask.GetAsync(TaskId)).State);
+            return new(false, false, "Auto-start is temporarily unavailable in packaged builds.");
         if (!string.Equals(Environment.ProcessPath, InstalledExe, StringComparison.OrdinalIgnoreCase))
             return new(false, false, "Install Searchlight before configuring auto-start.");
         return await ReadShortcutStateAsync();
@@ -48,13 +46,6 @@ internal sealed class StartupRegistration : IStartupRegistration
     {
         StartupRegistrationState state = await GetStateAsync();
         if (!state.CanChange || state.IsEnabled == enabled) return state;
-        if (AppIdentity.IsPackaged)
-        {
-            StartupTask task = await StartupTask.GetAsync(TaskId);
-            if (enabled) return FromTaskState(await task.RequestEnableAsync());
-            task.Disable();
-            return FromTaskState(task.State);
-        }
         if (enabled)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ShortcutPath)!);
@@ -98,16 +89,6 @@ internal sealed class StartupRegistration : IStartupRegistration
         }
         return new(false, false, "Windows controls this startup entry. Manage it in Windows startup settings.");
     }
-
-    private static StartupRegistrationState FromTaskState(StartupTaskState state) => state switch
-    {
-        StartupTaskState.Enabled => new(true, true),
-        StartupTaskState.Disabled => new(false, true),
-        StartupTaskState.DisabledByUser => new(false, false, "Windows has disabled auto-start. Re-enable Searchlight in Windows startup settings."),
-        StartupTaskState.DisabledByPolicy => new(false, false, "Your organization's policy disables auto-start."),
-        StartupTaskState.EnabledByPolicy => new(true, false, "Your organization's policy requires auto-start."),
-        _ => throw new InvalidOperationException($"Unsupported startup state: {state}."),
-    };
 
     private static T WithShortcut<T>(Func<dynamic, T> action)
     {

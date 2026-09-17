@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         IgnorableNamespaces="uap desktop rescap">
+         IgnorableNamespaces="uap rescap">
   <!-- ASSUMPTION: Build-Msix generates a channel-specific copy, never edits this template. -->
   <Identity Name="TimothyMothra.Searchlight.Dev" Publisher="CN=Searchlight Development"
             Version="1.0.0.0" ProcessorArchitecture="x64" />
@@ -24,11 +23,8 @@
                           BackgroundColor="transparent"
                           Square44x44Logo="Assets\PackageLogo44.png"
                           Square150x150Logo="Assets\PackageLogo150.png" />
-      <Extensions>
-        <desktop:Extension Category="windows.startupTask" Executable="Searchlight.exe" EntryPoint="Windows.FullTrustApplication">
-          <desktop:StartupTask TaskId="SearchlightStartup" Enabled="false" DisplayName="Searchlight Dev" />
-        </desktop:Extension>
-      </Extensions>
+      <!-- TODO(packaged-startup): restore startup registration when the distribution
+           contract permits it; also restore the packaged setting and validation rules. -->
     </Application>
   </Applications>
   <Capabilities>

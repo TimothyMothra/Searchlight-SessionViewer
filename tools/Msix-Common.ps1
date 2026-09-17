@@ -63,6 +63,7 @@ function Get-MsixManifest {
             Version = [version]$identity.Version
             Architecture = [string]$identity.ProcessorArchitecture
             ApplicationId = [string]$manifest.Package.Applications.Application.Id
+            HasStartupRegistration = $manifest.SelectNodes("//*[local-name()='StartupTask' or @Category='windows.startupTask']").Count -gt 0
             Entries = @($zip.Entries.FullName)
         }
     }

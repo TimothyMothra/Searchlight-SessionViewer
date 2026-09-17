@@ -13,6 +13,9 @@ if ($manifest.Name -cne $ExpectedName -or $manifest.Publisher -cne $ExpectedPubl
     $manifest.Version -ne $ExpectedVersion -or $manifest.Architecture -ne $ExpectedArchitecture) {
     throw "Unexpected MSIX identity: $($manifest | ConvertTo-Json -Compress)"
 }
+if ($manifest.HasStartupRegistration) {
+    throw 'Packaged startup registration is temporarily unsupported.'
+}
 # ASSUMPTION: this is the self-contained WinUI/.NET distribution, not just the managed DLL.
 foreach ($required in @('Searchlight.exe', 'Searchlight.dll', 'resources.pri',
     'Microsoft.UI.Xaml.dll', 'e_sqlite3.dll', 'coreclr.dll', 'hostfxr.dll')) {

@@ -48,3 +48,6 @@ Key invariants (see docs for detail):
 - Validate both packages and the completed bundle. Report it as an unsigned candidate;
   these defaults do not establish publisher trust, authorize certificate changes,
   install the bundle, or publish/upload it.
+- Packaged builds and bundles must omit startup registration and hide the startup setting
+  until the temporary distribution restriction is retired. Unpackaged Production startup
+  behavior is unchanged. Track restoration in the `packaged-startup` TODO in `docs/msix.md`.

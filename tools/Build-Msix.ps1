@@ -74,19 +74,10 @@ $manifest.Package.Identity.SetAttribute('ProcessorArchitecture', $Architecture)
 $manifest.Package.Properties.DisplayName = $displayName
 $visuals = $manifest.SelectSingleNode("//*[local-name()='VisualElements']")
 $visuals.SetAttribute('DisplayName', $displayName)
-$startup = $manifest.SelectSingleNode("//*[local-name()='StartupTask']")
-if ($Channel -eq 'Dev') {
-    # Dev must not appear as an auto-start option, even in Windows Settings.
-    $extension = $startup.ParentNode
-    $extensions = $extension.ParentNode
-    [void]$extensions.RemoveChild($extension)
-    if ($extensions.SelectNodes('*').Count -eq 0) {
-        [void]$extensions.ParentNode.RemoveChild($extensions)
-    }
-}
-else {
-    $startup.SetAttribute('DisplayName', $displayName)
-    $startup.SetAttribute('Enabled', 'true')
+# ASSUMPTION: every package may become a bundle input. Fail closed if startup
+# registration returns before the temporary distribution restriction is retired.
+if ($manifest.SelectNodes("//*[local-name()='StartupTask' or @Category='windows.startupTask']").Count -gt 0) {
+    throw 'Packaged startup registration is temporarily unsupported.'
 }
 $manifestPath = Join-Path $stage 'Package.appxmanifest'
 $manifest.Save($manifestPath)

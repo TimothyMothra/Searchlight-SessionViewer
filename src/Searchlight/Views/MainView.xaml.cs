@@ -24,7 +24,8 @@ public sealed partial class MainView : UserControl
 {
     public MainViewModel ViewModel { get; }
     public StartupSettingsViewModel Startup { get; } = new(new StartupRegistration());
-    public bool ShowStartupSetting => AppIdentity.Channel == "Production";
+    // TODO(packaged-startup): restore alongside the manifest declaration when supported.
+    public bool ShowStartupSetting => AppIdentity.Channel == "Production" && !AppIdentity.IsPackaged;
     public bool IsDevChannel => AppIdentity.Channel == "Dev";
     public bool CanConfigureMonitoring => !IsDevChannel;
     public string MonitoringLogPath => System.IO.Path.Combine(System.IO.Path.GetTempPath(), AppIdentity.LogFileName);

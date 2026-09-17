@@ -120,6 +120,19 @@ containing **x64 + ARM64**, using `TimothyMothra.Searchlight` and
 an explicit, separate single-package testing workflow. Do not ask for the channel/signing
 choice again unless the user requests a change.
 
+**Temporary startup omission:** all MSIX packages (including Production bundle inputs)
+omit `windows.startupTask` extensions and `StartupTask` declarations. Build and package
+validation reject either declaration, so bundling previously generated startup-enabled
+packages is also rejected. Packaged Settings hides the startup option and its service
+reports it unavailable rather than trying to access a missing task. The unpackaged
+Production installation retains its existing startup shortcut behavior.
+
+**TODO (`packaged-startup`):** remove this temporary restriction once the distribution
+contract supports startup registration. Restore Production's manifest declaration and
+packaged startup service/UI together, update the build/package rejection rules and tests,
+and verify upgrade, user-disabled, and policy-controlled states. Dev must remain excluded
+from auto-start. Do not restore startup merely by removing a validation check.
+
 Use the current release's build name when the source matches an already-built local release;
 otherwise allocate one shared name. For example:
 
@@ -220,11 +233,9 @@ Each channel has its own process mutex, activation event, window/tray label, and
 `Searchlight.Unpackaged.log`. Dev always writes monitoring logs; Production and unpackaged
 builds require the shared `EnableMonitoring` opt-in, which defaults off. A second launch
 activates only its own channel.
-Dev has an orange badge on its package logos and declares no startup task, so it does not
-appear as an auto-start option in the app or Windows Settings. Production exposes
-**Start Searchlight when I sign in**, reflecting OS startup state rather than shared JSON.
-Packaged Production declares a startup task enabled on first launch; Windows/user startup
-settings still control it. Neither package creates the old Startup-folder shortcut.
+Dev has an orange badge on its package logos. Neither Dev nor packaged Production declares
+a startup task or exposes an auto-start option while the `packaged-startup` restriction
+above is in effect. Neither package creates a Startup-folder shortcut.
 The unpackaged Production installation manages its existing Startup shortcut, and its
 installer preserves an absent/disabled shortcut on upgrades instead of re-enabling it.
 
