@@ -421,8 +421,11 @@ wt.exe -w <last|new> new-tab --title "<name>" cmd /k copilot --resume=<session-i
 - `Assets/app.ico` — multi-res (16/32/48/256) app icon: embedded as the exe/taskbar/Alt-Tab icon
   (`<ApplicationIcon>`), the tray icon (`H.NotifyIcon` `IconSource` loaded by **absolute path**
   because unpackaged `ms-appx:///` is unreliable), and the window titlebar icon (`AppWindow.SetIcon`).
-- `tools/make_icon.py` — Pillow generator that produces `app.ico` + `app_{256,48,32,16}.png`
-  previews (8× supersample + Lanczos downscale). Deliberately **not** the trademarked Copilot logo.
+- `tools/make_icon.py` — Pillow generator that produces `app.ico`, `app_{256,48,32,16}.png`
+  previews, and a directly rendered `app_1024.png` packaging/listing master. Uses up to
+  8× supersampling (a 2048px drawing-surface cap) plus Lanczos downscale.
+  `python tools\make_icon.py --master-only` regenerates the master without changing shell icons.
+  Deliberately **not** the trademarked Copilot logo.
 
 ---
 

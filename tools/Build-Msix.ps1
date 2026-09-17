@@ -82,25 +82,8 @@ if ($manifest.SelectNodes("//*[local-name()='StartupTask' or @Category='windows.
 $manifestPath = Join-Path $stage 'Package.appxmanifest'
 $manifest.Save($manifestPath)
 
-Add-Type -AssemblyName System.Drawing
-$source = [Drawing.Image]::FromFile((Join-Path $projectRoot 'Assets\app_256.png'))
-try {
-    foreach ($size in @(44, 50, 150)) {
-        $image = [Drawing.Bitmap]::new($size, $size)
-        $graphics = [Drawing.Graphics]::FromImage($image)
-        try {
-            $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-            $graphics.DrawImage($source, 0, 0, $size, $size)
-            if ($Channel -eq 'Dev') {
-                $badgeSize = [int]($size / 3)
-                $graphics.FillRectangle([Drawing.Brushes]::DarkOrange, $size - $badgeSize, $size - $badgeSize, $badgeSize, $badgeSize)
-            }
-            $image.Save((Join-Path $assets "PackageLogo$size.png"), [Drawing.Imaging.ImageFormat]::Png)
-        }
-        finally { $graphics.Dispose(); $image.Dispose() }
-    }
-}
-finally { $source.Dispose() }
+& (Join-Path $PSScriptRoot 'New-MsixLogos.ps1') -SourcePath (Join-Path $projectRoot 'Assets\app_1024.png') `
+    -OutputDirectory $assets -Channel $Channel
 
 $arguments = @((Join-Path $projectRoot 'Searchlight.csproj'), '-nologo', '-m:1', '-t:Build', '-v:minimal',
     "-p:Configuration=$Configuration", "-p:Platform=$Architecture", "-p:RuntimeIdentifier=win-$Architecture",
@@ -122,6 +105,7 @@ if (-not $Unsigned) {
 $result = & (Join-Path $PSScriptRoot 'Test-MsixPackage.ps1') -Path $package -ExpectedName $PackageName `
     -ExpectedPublisher $Publisher -ExpectedVersion $PackageVersion -ExpectedArchitecture $Architecture `
     -RequireSignature:(-not $Unsigned)
+& (Join-Path $PSScriptRoot 'Test-MsixLogos.ps1') -PackagePath $package
 [pscustomobject]@{
     Path = $package
     Channel = $Channel

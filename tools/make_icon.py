@@ -6,8 +6,10 @@ four-point AI "spark" (upper-right) and descending "session list" bars
 (lower-left). Rendered per-size so it stays crisp: at 16/20 px the list bars
 are dropped and the spark is centered & enlarged for legibility in the tray.
 
-Output: Assets\app.ico (multi-resolution 16..256) plus preview PNGs.
+Output: Assets\app.ico (multi-resolution 16..256), preview PNGs, and a 1024px
+packaging/listing master. Use --master-only to leave existing shell icons alone.
 """
+import argparse
 import math
 import os
 from PIL import Image, ImageDraw
@@ -53,7 +55,9 @@ def star4(cx, cy, r_tip, r_in, rot=0.0):
 
 def draw_tile(size):
     """Render the icon at the given logical size, returns an RGBA image."""
-    S = size * SS
+    # ASSUMPTION: a 2048px drawing surface retains antialiasing for the 1024px
+    # master without allocating an 8192px surface; existing small renders stay identical.
+    S = size * min(SS, max(1, 2048 // size))
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
@@ -124,16 +128,21 @@ def _spark(draw, cx, cy, r_tip, r_in, alpha=255):
     draw.polygon(star4(cx, cy, r_tip, r_in), fill=(255, 255, 255, alpha))
 
 
-sizes = [16, 20, 24, 32, 48, 64, 128, 256]
-frames = [draw_tile(s) for s in sizes]
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--master-only", action="store_true")
+    args = parser.parse_args()
+    if not args.master_only:
+        sizes = [16, 20, 24, 32, 48, 64, 128, 256]
+        frames = [draw_tile(s) for s in sizes]
+        ico_path = os.path.join(OUT_DIR, "app.ico")
+        frames[-1].save(ico_path, format="ICO", sizes=[(s, s) for s in sizes])
+        print("wrote", ico_path)
+        for s in (256, 48, 32, 16):
+            p = os.path.join(OUT_DIR, f"app_{s}.png")
+            draw_tile(s).save(p)
+            print("wrote", p)
 
-ico_path = os.path.join(OUT_DIR, "app.ico")
-frames[-1].save(ico_path, format="ICO",
-                sizes=[(s, s) for s in sizes])
-print("wrote", ico_path)
-
-# Previews for the biggest few (so the design can be inspected as PNG).
-for s in (256, 48, 32, 16):
-    p = os.path.join(OUT_DIR, f"app_{s}.png")
-    draw_tile(s).save(p)
+    p = os.path.join(OUT_DIR, "app_1024.png")
+    draw_tile(1024).save(p)
     print("wrote", p)

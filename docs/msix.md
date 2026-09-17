@@ -81,6 +81,26 @@ The generated manifest and package logos are under `src\Searchlight\obj\MsixInpu
 Builds do not rewrite the tracked manifest template. Artifacts, intermediates, and
 private certificate files are ignored by git.
 
+### High-resolution package icons
+
+`tools\New-MsixLogos.ps1` generates package logos from the directly rendered
+`Assets\app_1024.png` master, without enlarging the previous 256px bitmap.
+The existing unqualified 44px, 50px, and 150px manifest paths remain valid 100%
+fallbacks. Scale-qualified 125%, 150%, 200%, and 400% PNGs provide up to 176px,
+200px, and 600px respectively; the 44px app logo also has a 256px target-size
+variant. All Dev variants retain their orange badge. No SVG runtime support or
+Python dependency is needed to build MSIX from the checked-in master.
+
+The [AppDrop wiki](https://www.osgwiki.com/wiki/AppDrop#Publish_your_app) says that
+AppDrop extracts the app icon from the manifest automatically, but does not specify
+resolution selection or recommend SVG. These assets let resource-aware readers
+choose a crisp image; a reader that always enlarges the unqualified 50px fallback
+can still look blurry. `app_1024.png` is also available as standalone listing
+artwork if a distribution service supports a separate image upload.
+Run `tools\Test-MsixLogos.ps1` for generation checks across both channels; pass
+`-PackagePath <file.msix>` to inspect the actual packaged images. Every MSIX build
+also runs that payload check automatically.
+
 If a build reports missing restored assets, repeat with `-Restore`. This invokes
 Visual Studio MSBuild's restore before building. `-Unsigned` is available for
 payload inspection but is rejected by the installer.
