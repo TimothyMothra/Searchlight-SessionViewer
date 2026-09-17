@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Searchlight.Core\Searchlight.Core.csproj" />
+    <!-- The host probe uses only BCL Process APIs; test it without loading WinUI. -->
+    <Compile Include="..\Searchlight\Services\CopilotProcessProbe.cs" Link="Host\CopilotProcessProbe.cs" />
   </ItemGroup>
 
 </Project>

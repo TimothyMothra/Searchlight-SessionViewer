@@ -38,7 +38,7 @@ public sealed record SessionInfo
 
     // --- file-presence flags / state ---
 
-    /// <summary>True when an <c>inuse.&lt;PID&gt;.lock</c> file is present.</summary>
+    /// <summary>True when a native lock has a verified live Copilot owner, including idle owners.</summary>
     public bool IsInUse { get; init; }
 
     /// <summary>True when a <c>plan.md</c> (or variant) exists.</summary>

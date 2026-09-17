@@ -13,7 +13,10 @@ public sealed class SessionWatcher : ISessionWatcher
 {
     private readonly FileSystemWatcher? _watcher;
     private readonly System.Timers.Timer _debounce;
+    private readonly System.Timers.Timer _ownerPoll;
     private readonly object _gate = new();
+    private readonly string _root;
+    private bool _disposed;
 
     /// <summary>Raised (debounced) when session-state content changes.</summary>
     public event EventHandler? Changed;
@@ -23,27 +26,41 @@ public sealed class SessionWatcher : ISessionWatcher
     /// the watcher stays inert and never raises events.
     /// </summary>
     /// <param name="debounceMilliseconds">Quiet period before a change is reported.</param>
-    public SessionWatcher(int debounceMilliseconds = 2000)
+    public SessionWatcher(SessionActivityMonitor activity, int debounceMilliseconds = 2000)
+        : this(activity, CopilotPaths.SessionState, debounceMilliseconds, 10000) { }
+
+    internal SessionWatcher(SessionActivityMonitor activity, string root,
+        int debounceMilliseconds, int ownerPollMilliseconds)
     {
+        _root = root;
         _debounce = new System.Timers.Timer(debounceMilliseconds)
         {
             AutoReset = false,
         };
         _debounce.Elapsed += (_, _) => Changed?.Invoke(this, EventArgs.Empty);
+        _ownerPoll = new System.Timers.Timer(ownerPollMilliseconds);
+        _ownerPoll.Elapsed += (_, _) =>
+        {
+            lock (_gate)
+            {
+                if (!_disposed && activity.CheckForExitedOwners()) Kick();
+            }
+        };
 
-        if (!Directory.Exists(CopilotPaths.SessionState))
+        if (!Directory.Exists(root))
         {
             return;
         }
 
-        _watcher = new FileSystemWatcher(CopilotPaths.SessionState)
+        _watcher = new FileSystemWatcher(root)
         {
             IncludeSubdirectories = true,
             // Deliberately exclude LastWrite: active sessions append to events.jsonl
             // and .log files constantly, which would flood a full reload every couple
             // seconds and churn the list selection. We only care about structural
             // signals — a session folder appearing/disappearing/renamed, and the
-            // inuse.<PID>.lock file being created/removed (the "In use" badge).
+            // inuse.<PID>.lock file being created/removed. Owner exits without file
+            // changes are checked separately, without periodic catalog reloads.
             NotifyFilter = NotifyFilters.FileName
                 | NotifyFilters.DirectoryName
                 | NotifyFilters.CreationTime,
@@ -57,9 +74,14 @@ public sealed class SessionWatcher : ISessionWatcher
     /// <summary>Begins raising change notifications.</summary>
     public void Start()
     {
-        if (_watcher is not null)
+        lock (_gate)
         {
-            _watcher.EnableRaisingEvents = true;
+            if (_disposed) return;
+            if (_watcher is not null)
+            {
+                _watcher.EnableRaisingEvents = true;
+                _ownerPoll.Start();
+            }
         }
     }
 
@@ -79,10 +101,9 @@ public sealed class SessionWatcher : ISessionWatcher
     /// checkpoints, events.jsonl, logs — is transient churn that active sessions
     /// rewrite constantly and must NOT trigger a re-scan of all session folders.
     /// </summary>
-    private static bool IsStructural(string fullPath)
+    private bool IsStructural(string fullPath)
     {
-        string root = CopilotPaths.SessionState;
-        string rel = Path.GetRelativePath(root, fullPath);
+        string rel = Path.GetRelativePath(_root, fullPath);
         if (string.IsNullOrEmpty(rel) || rel == ".")
         {
             return false;
@@ -105,14 +126,14 @@ public sealed class SessionWatcher : ISessionWatcher
 
         // Otherwise only the in-use lock file matters for a live badge update.
         string name = Path.GetFileName(fullPath);
-        return name.StartsWith("inuse.", StringComparison.OrdinalIgnoreCase)
-            && name.EndsWith(".lock", StringComparison.OrdinalIgnoreCase);
+        return sep == 1 && SessionActivityMonitor.IsLockFile(name);
     }
 
     private void Kick()
     {
         lock (_gate)
         {
+            if (_disposed) return;
             _debounce.Stop();
             _debounce.Start();
         }
@@ -121,7 +142,12 @@ public sealed class SessionWatcher : ISessionWatcher
     /// <inheritdoc />
     public void Dispose()
     {
-        _watcher?.Dispose();
-        _debounce.Dispose();
+        lock (_gate)
+        {
+            _disposed = true;
+            _watcher?.Dispose();
+            _ownerPoll.Dispose();
+            _debounce.Dispose();
+        }
     }
 }

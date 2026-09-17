@@ -29,7 +29,7 @@ fields vary by client/version; unsupported or missing data must remain explicit.
 
 | Source (under `~/.copilot`) | Reader | What it yields | Cost |
 |-----------------------------|--------|----------------|------|
-| `session-state/<id>/` folders | `SessionStateScanner` | One base `SessionInfo` per folder: `Id`, `FolderName`, `FolderPath`, `Kind`, `LastWriteTime`, presence flags (`IsInUse` via `inuse.<PID>.lock`, `HasPlan`, `HasSessionDb`, `HasCheckpoints`, `HasEvents`) and `IsEnriched`. Splits `optimistic-chat-` prefix → `Chat`, else `Project`. | cheap (bulk) |
+| `session-state/<id>/` folders | `SessionStateScanner` | One base `SessionInfo` per folder: `Id`, `FolderName`, `FolderPath`, `Kind`, `LastWriteTime`, verified activity (`IsInUse` via native lock + live owner), presence flags (`HasPlan`, `HasSessionDb`, `HasCheckpoints`, `HasEvents`) and `IsEnriched`. Splits `optimistic-chat-` prefix → `Chat`, else `Project`. | cheap (bulk) |
 | `session-state/<id>/workspace.yaml` | `WorkspaceYamlReader` | `WorkspaceMetadata` (id, name, cwd, Git root/repository/host/branch, client, created/updated, user-named, summary count, remote steering, MC ids) via YamlDotNet. Optional booleans/counts remain nullable. | cheap (bulk) |
 | `session-state/<id>/events.jsonl` | `EventsJsonlReader` | `SessionStartInfo` — UTF-8 head preview bounded by 2,000 lines and 8 MiB input, with individual events over 1 MiB skipped: `session.start` baseline + latest in-window `session.model_change` + first in-window `user.message` preview. A separate reverse scan finds the last prompt with the same per-scan limits. Documents are disposed without cloning; the complete log is never materialized. Limit hits are logged. | heavy (lazy, cached) |
 | `session-state/<id>/checkpoints/NNN-title.md` + `index.md` | `CheckpointsReader` | `CheckpointInfo` list; prefers the fuller title from `index.md`'s table over the truncated file name. | heavy (lazy) |
@@ -40,6 +40,28 @@ summaries. It enriches the newest **30** sessions plus all pins and the selectio
 publication, then loads remaining summaries in **30-row batches**. This preserves catalog-wide
 name/folder/branch search without preloading event content. Note-presence is indexed once per
 refresh rather than probing the filesystem during search.
+
+**In use means verified live process ownership, not active generation or a visible session.**
+Idle, waiting, and background App sessions count while their owners remain alive. The badge
+does not count open tabs/windows or prove that the owner is responsive; a lingering or stalled
+App server can legitimately satisfy this narrower definition.
+`SessionActivityMonitor` requires a
+native `inuse.<PID>.lock` whose bounded, plain-text PID matches its filename, plus a host-confirmed
+live Copilot process that started no later than the lock's last-write time. Stale locks, reused
+PIDs, unrelated processes, malformed files, and unavailable process information do not earn a
+badge. The Windows probe recognizes `copilot` and the native updater's
+`copilot.exe.old-<PID>-<timestamp>` name. Unsupported launchers (such as generic `node` hosts)
+remain unconfirmed rather than guessed from recency. This assumes locally produced native locks;
+it is not an authenticated ownership protocol for copied/edited files or remote sessions.
+Idle owners may remain valid for days; no recent-activity threshold is used.
+
+Cached summaries recheck lock ownership on refresh independently of folder timestamps.
+The watcher polls only previously confirmed locks every **10 seconds**, requesting a debounced
+refresh when confirmation is lost (normally within about 12 seconds). An unchanged live owner
+does not trigger a catalog reload. File create/delete notifications still discover new locks.
+An unavailable inspection hides the badge; manual refresh can confirm it after access recovers.
+The Details field is **Live lock owner confirmed**, not **In-use lock present**. Locks are
+never deleted, rewritten, or repaired.
 
 Events load asynchronously when Details is active (the default on session selection).
 Checkpoint lists load only when their tab is opened.

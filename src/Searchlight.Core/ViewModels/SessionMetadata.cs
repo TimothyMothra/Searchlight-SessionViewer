@@ -119,7 +119,7 @@ public static class SessionMetadata
                 Field(nameof(session.FolderPath), "Session data folder", session.FolderPath),
                 Field(nameof(session.Kind), "Kind (inferred)", session.Kind),
                 Field(nameof(session.LastWriteTime), "Folder last modified", session.LastWriteTime),
-                Field(nameof(session.IsInUse), "In-use lock present", session.IsEnriched ? session.IsInUse : null),
+                Field(nameof(session.IsInUse), "Live lock owner confirmed", session.IsEnriched ? session.IsInUse : null),
                 Field(nameof(session.HasPlan), "Plan file present", session.IsEnriched ? session.HasPlan : null),
                 Field(nameof(session.HasEvents), "Event log present", session.IsEnriched ? session.HasEvents : null),
                 Field(nameof(session.HasSessionDb), "Session database present", session.IsEnriched ? session.HasSessionDb : null),

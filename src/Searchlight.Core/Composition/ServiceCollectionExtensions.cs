@@ -51,8 +51,9 @@ public static class ServiceCollectionExtensions
         }
         else
         {
+            services.AddSingleton<SessionActivityMonitor>();
             services.AddSingleton<ISessionDataSource, LiveSessionDataSource>();
-            // IResumeLauncher + ISessionWatcher are registered by the Windows host.
+            // IResumeLauncher + ISessionWatcher + ICopilotProcessProbe come from the host.
         }
 
         // View-models.

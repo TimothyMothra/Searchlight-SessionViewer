@@ -445,6 +445,7 @@
                                 </Border>
                                 <Border Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
                                         CornerRadius="4" Padding="6,2"
+                                        ToolTipService.ToolTip="A live Copilot process owns this session. It may be idle or waiting in the background."
                                         Visibility="{x:Bind IsInUse, Converter={StaticResource BoolToVis}}">
                                     <TextBlock Text="In use" FontSize="10"
                                                Foreground="{ThemeResource SystemFillColorSuccessBrush}" />

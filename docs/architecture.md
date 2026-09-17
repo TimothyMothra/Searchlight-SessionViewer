@@ -71,7 +71,7 @@ Windows-only assembly. The host and the tests depend on Core.
 | **Readers** | `SessionStateScanner`, `WorkspaceYamlReader`, `EventsJsonlReader`, `CheckpointsReader`, `SessionDbReader` | Read-only readers over native session files. Todo reads return explicit availability/error states; other readers retain their null-safe empty-result contracts. See [data-model.md](./data-model.md). |
 | **Aggregation** | `SessionAggregator` | Combines scanner + native workspace metadata into the `SessionInfo` list. Splits work into a **cheap bulk pass** (`LoadAll`) and **lazy per-session enrichment** (`EnrichWithEvents`), without external enrichment stores. |
 | **Data source façade** | `ISessionDataSource` → `LiveSessionDataSource`, `MockSessionDataSource` | Single seam the view-models talk to. Live composes the aggregator + detail readers; Mock returns 15 synthetic sessions in-memory. |
-| **Abstractions** | `IUiDispatcher`, `IResumeLauncher`, `ISessionWatcher` | Platform seams the host implements. Keep Core free of WinUI/Win32/`Process`. |
+| **Abstractions** | `IUiDispatcher`, `IResumeLauncher`, `ISessionWatcher`, `ICopilotProcessProbe` | Platform seams. The host's `CopilotProcessProbe` supplies live process identity/start time; Core's `SessionActivityMonitor` validates native locks. Keep Core free of WinUI/Win32/`Process`. |
 | **View-models** | `MainViewModel`, `DetailsViewModel`, `TodosViewModel` | MVVM (CommunityToolkit.Mvvm). Own the grouped session list, selection, filter, Resume command, and independently activated Todos snapshot. |
 | **Composition** | `ServiceCollectionExtensions.AddCopilotCore(useMock)` | Registers all of the above into an `IServiceCollection`. |
 | **Diagnostics** | `CoreLog`, `MonitoringPolicy` | Consent-gated sink shared by Core/host. Dev is always enabled; Production/unpackaged require the saved opt-in. `EnabledChanged` releases active render observers on opt-out. |
@@ -88,6 +88,7 @@ ServiceCollection
   ├─ AddSingleton<IUiDispatcher>(DispatcherQueueUiDispatcher)   // always host-supplied
   ├─ (live only) AddSingleton<IResumeLauncher, ResumeLauncher>
   ├─ (live only) AddSingleton<ISessionWatcher, SessionWatcher>
+  ├─ (live only) AddSingleton<ICopilotProcessProbe, CopilotProcessProbe>
   └─ AddCopilotCore(useMock)                              // Core contributes the rest
 ```
 
@@ -96,7 +97,7 @@ ServiceCollection
 - Registers the stateless readers, `SessionAggregator`, and `SettingsService` (via `TryAdd`, so the
   host's pre-built instance wins).
 - **`useMock == false` (live):** `ISessionDataSource → LiveSessionDataSource`. The host supplies
-  `IResumeLauncher` + `ISessionWatcher`.
+  `IResumeLauncher` + `ISessionWatcher` + `ICopilotProcessProbe`; Core registers `SessionActivityMonitor`.
 - **`useMock == true` (mock):** `ISessionDataSource → MockSessionDataSource`, plus inert
   `MockResumeLauncher` and `NullSessionWatcher` — so a mock host only needs to add `IUiDispatcher`.
 - Registers `DetailsViewModel` and `MainViewModel` (singletons).
@@ -150,6 +151,9 @@ manually (double-dispose). See `App.ExitApplication`.
   Unchanged session summaries are reused from an in-memory cache. Folder timestamps, workspace
   timestamps/lengths, and checkpoint-directory timestamps invalidate changed summaries; deleted
   folders are evicted. The cache is not persisted to Copilot's data directory.
+  Lock paths are cached with summaries, but live ownership is rechecked on cache hits: process
+  exit is independent of file versions. The watcher checks confirmed owners every 10 seconds
+  and reloads only when confirmation is lost, not on every timer tick.
 - **First publication** enriches the newest **30** rows plus every pin and the current selection.
   Remaining missing summaries load in **30-row batches**, with indexed row lookup and a
   bounded producer/consumer queue. The producer can retain two queued batches and continue reading

@@ -14,20 +14,22 @@ public sealed class SessionStateScanner
     private const string ChatPrefix = "optimistic-chat-";
 
     private readonly WorkspaceYamlReader _workspaceReader;
+    private readonly SessionActivityMonitor? _activity;
     private readonly string _root;
     private readonly object _cacheGate = new();
-    private readonly Dictionary<string, (SummaryVersion Version, SessionInfo Session)> _cache = [];
+    private readonly Dictionary<string, (SummaryVersion Version, SessionInfo Session, string[] Locks)> _cache = [];
 
     private readonly record struct SummaryVersion(long FolderTicks, FileVersion Workspace, FileVersion Checkpoints);
 
     /// <summary>Creates a scanner using the given workspace.yaml reader.</summary>
-    public SessionStateScanner(WorkspaceYamlReader workspaceReader)
-        : this(workspaceReader, CopilotPaths.SessionState) { }
+    public SessionStateScanner(WorkspaceYamlReader workspaceReader, SessionActivityMonitor? activity = null)
+        : this(workspaceReader, CopilotPaths.SessionState, activity) { }
 
-    internal SessionStateScanner(WorkspaceYamlReader workspaceReader, string root)
+    internal SessionStateScanner(WorkspaceYamlReader workspaceReader, string root, SessionActivityMonitor? activity = null)
     {
         _workspaceReader = workspaceReader;
         _root = root;
+        _activity = activity;
     }
 
     /// <summary>
@@ -113,7 +115,7 @@ public sealed class SessionStateScanner
                 // versions, but only changed sessions reparse YAML/enumerate flags.
                 if (_cache.TryGetValue(folderPath, out var cached)
                     && cached.Version == VersionFor(folderPath, lastWrite))
-                    return cached.Session;
+                    return RefreshActivity(folderPath, cached);
             }
 
             return new SessionInfo
@@ -149,18 +151,18 @@ public sealed class SessionStateScanner
             lock (_cacheGate)
             {
                 if (_cache.TryGetValue(folderPath, out var cached) && cached.Version == version)
-                    return cached.Session;
+                    return RefreshActivity(folderPath, cached);
             }
             WorkspaceMetadata? workspace = _workspaceReader.Read(folderPath);
 
             // One directory enumeration replaces separate lock/plan enumerations
             // and events/database existence probes.
-            bool inUse = false, plan = false, database = false, events = false;
+            bool plan = false, database = false, events = false;
+            List<string> locks = [];
             foreach (string file in Directory.EnumerateFiles(folderPath))
             {
                 string name = Path.GetFileName(file);
-                inUse |= name.StartsWith("inuse.", StringComparison.OrdinalIgnoreCase)
-                    && name.EndsWith(".lock", StringComparison.OrdinalIgnoreCase);
+                if (SessionActivityMonitor.IsLockFile(name)) locks.Add(file);
                 plan |= name.StartsWith("plan", StringComparison.OrdinalIgnoreCase)
                     && name.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
                 database |= name.Equals("session.db", StringComparison.OrdinalIgnoreCase);
@@ -170,20 +172,40 @@ public sealed class SessionStateScanner
             {
                 LastWriteTime = lastWrite,
                 Workspace = workspace,
-                IsInUse = inUse,
+                IsInUse = HasLiveOwner(locks),
                 HasPlan = plan,
                 HasSessionDb = database,
                 HasCheckpoints = HasCheckpointContent(folderPath),
                 HasEvents = events,
                 IsEnriched = true,
             };
-            lock (_cacheGate) _cache[folderPath] = (version, enriched);
+            lock (_cacheGate) _cache[folderPath] = (version, enriched, locks.ToArray());
             return enriched;
         }
         catch (Exception)
         {
             return session;
         }
+    }
+
+    private SessionInfo RefreshActivity(string path,
+        (SummaryVersion Version, SessionInfo Session, string[] Locks) cached)
+    {
+        // ASSUMPTION: process exit need not touch the folder. Recheck ownership
+        // even when all summary versions match, retaining unchanged row identities.
+        bool inUse = HasLiveOwner(cached.Locks);
+        if (cached.Session.IsInUse == inUse) return cached.Session;
+        SessionInfo refreshed = cached.Session with { IsInUse = inUse };
+        _cache[path] = (cached.Version, refreshed, cached.Locks);
+        return refreshed;
+    }
+
+    private bool HasLiveOwner(IEnumerable<string> locks)
+    {
+        bool active = false;
+        // Check every lock so multiple owners are monitored, not only the first.
+        foreach (string path in locks) active |= _activity?.HasLiveOwner(path) == true;
+        return active;
     }
 
     private static SummaryVersion VersionFor(string folderPath, DateTimeOffset lastWrite) =>
