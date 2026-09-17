@@ -16,6 +16,13 @@
         <conv:StringToVisibilityConverter x:Key="StringToVis" />
         <conv:StringOrDashConverter x:Key="StringOrDash" />
         <conv:FriendlyDateConverter x:Key="FriendlyDate" />
+        <!-- ASSUMPTION: each independent setting is one card; Resume command keeps its existing grouped box. -->
+        <Style x:Key="SettingsCardStyle" TargetType="Border">
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="Margin" Value="0,0,0,16" />
+            <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
     </UserControl.Resources>
 
     <Grid x:Name="RootGrid">
@@ -121,73 +128,117 @@
                 <TextBlock x:Name="PaneTitle" Style="{StaticResource SubtitleTextBlockStyle}"
                            VerticalAlignment="Center" AutomationProperties.HeadingLevel="Level1" />
             </StackPanel>
-            <ScrollViewer x:Name="SettingsPane" Grid.Row="1" Visibility="Collapsed"
+            <Grid x:Name="SettingsPane" Grid.Row="1" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Changes are saved automatically."
+                           TextWrapping="Wrap" Margin="24,0,24,16"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="176" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <!-- ASSUMPTION: groups navigate within one continuous options list, without changing preferences. -->
+                    <ListView x:Name="SettingsGroupList" Margin="16,0,8,24"
+                              SelectionMode="Single" IsItemClickEnabled="True"
+                              SelectionChanged="OnSettingsGroupSelectionChanged"
+                              ItemClick="OnSettingsGroupItemClick"
+                              AutomationProperties.Name="Settings groups"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.HorizontalScrollMode="Disabled">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="12,10" />
+                                <Setter Property="Margin" Value="0,2" />
+                                <Setter Property="CornerRadius" Value="6" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListViewItem Tag="General">
+                            <TextBlock Text="General" TextWrapping="Wrap" />
+                        </ListViewItem>
+                        <ListViewItem Tag="Resume">
+                            <TextBlock Text="Resume &amp; terminal" TextWrapping="Wrap" />
+                        </ListViewItem>
+                        <ListViewItem Tag="Sessions">
+                            <TextBlock Text="Sessions" TextWrapping="Wrap" />
+                        </ListViewItem>
+                        <ListViewItem Tag="Diagnostics">
+                            <TextBlock Text="Diagnostics" TextWrapping="Wrap" />
+                        </ListViewItem>
+                    </ListView>
+                    <Border Grid.Column="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <ScrollViewer x:Name="SettingsOptionsScrollViewer" Grid.Column="2"
+                          Loaded="OnSettingsOptionsLoaded"
+                          AutomationProperties.Name="Settings options"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           HorizontalScrollMode="Disabled" HorizontalContentAlignment="Stretch">
-                <StackPanel Spacing="8" Margin="24,0,24,32">
-                    <TextBlock Text="Changes are saved automatically."
-                               TextWrapping="Wrap" Margin="0,0,0,16"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <Border Padding="16" Margin="0,0,0,16"
-                            Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8">
+                <StackPanel x:Name="SettingsOptions" Spacing="8" Margin="24,0,24,32">
+                    <TextBlock x:Name="GeneralSettingsHeading" Text="General"
+                               Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8"
+                               AutomationProperties.HeadingLevel="Level2" />
+                    <Border Style="{StaticResource SettingsCardStyle}"
+                            Visibility="{x:Bind ShowStartupSetting, Converter={StaticResource BoolToVis}}">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="Monitoring" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <TextBlock Text="Writes local diagnostic and performance logs, including Details rendering timings. Logs are not uploaded and may contain paths, commands, and error details."
+                            <ToggleSwitch Header="Start Searchlight when I sign in"
+                                          AutomationProperties.Name="Start Searchlight when I sign in"
+                                          IsOn="{x:Bind Startup.IsEnabled, Mode=OneWay}"
+                                          IsEnabled="{x:Bind Startup.CanChange, Mode=OneWay}"
+                                          Toggled="OnStartupToggled" />
+                            <TextBlock Text="Controls auto-start for this Production installation only."
                                        TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            <ToggleSwitch Header="Enable monitoring logs" AutomationProperties.Name="Enable monitoring logs"
-                                          Visibility="{x:Bind CanConfigureMonitoring, Converter={StaticResource BoolToVis}}"
-                                          IsOn="{x:Bind ViewModel.Settings.Current.EnableMonitoring, Mode=TwoWay}" />
-                            <TextBlock Text="Monitoring is always on in Dev. Production is opt-in and off by default."
-                                       TextWrapping="Wrap"
-                                       Visibility="{x:Bind IsDevChannel, Converter={StaticResource BoolToVis}}" />
-                            <TextBlock Text="{x:Bind MonitoringLogPath}" TextWrapping="Wrap"
-                                       IsTextSelectionEnabled="True" FontSize="12"
+                            <TextBlock Text="{x:Bind Startup.Message, Mode=OneWay}" TextWrapping="Wrap"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <HyperlinkButton Content="Open Windows startup settings"
+                                             NavigateUri="ms-settings:startupapps"
+                                             HorizontalAlignment="Left" Padding="0" />
                         </StackPanel>
                     </Border>
-                    <StackPanel Spacing="8" Margin="0,0,0,16"
-                                Visibility="{x:Bind ShowStartupSetting, Converter={StaticResource BoolToVis}}">
-                        <ToggleSwitch Header="Start Searchlight when I sign in"
-                                      AutomationProperties.Name="Start Searchlight when I sign in"
-                                      IsOn="{x:Bind Startup.IsEnabled, Mode=OneWay}"
-                                      IsEnabled="{x:Bind Startup.CanChange, Mode=OneWay}"
-                                      Toggled="OnStartupToggled" />
-                        <TextBlock Text="Controls auto-start for this Production installation only."
-                                   TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBlock Text="{x:Bind Startup.Message, Mode=OneWay}" TextWrapping="Wrap"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <HyperlinkButton Content="Open Windows startup settings"
-                                         NavigateUri="ms-settings:startupapps"
-                                         HorizontalAlignment="Left" Padding="0" />
-                    </StackPanel>
-                    <TextBlock Text="Reuse my existing terminal window"
-                               Style="{StaticResource BodyStrongTextBlockStyle}"
-                               TextWrapping="Wrap" />
-                    <TextBlock TextWrapping="Wrap"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               Text="When on, resuming a session opens a new tab in your most-recently-used Windows Terminal window (a new one is created only if none is open). When off, each resume opens its own new window." />
-                    <ToggleSwitch MinWidth="0" AutomationProperties.Name="Reuse my existing terminal window"
-                                  OnContent="On" OffContent="Off"
-                                  IsOn="{x:Bind ViewModel.Settings.Current.UseSharedTerminalWindow, Mode=TwoWay}" />
-
                     <!-- Elevation opt-in. Needed when the user's main Terminal
                          runs as Admin: matching integrity level lets `wt -w`
                          reuse that window. Flipping on relaunches elevated. -->
-                    <TextBlock Text="Run as administrator"
-                               Style="{StaticResource BodyStrongTextBlockStyle}"
-                               TextWrapping="Wrap" Margin="0,8,0,0" />
-                    <TextBlock TextWrapping="Wrap"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               Text="Turn on if your main Terminal runs as Administrator. The app restarts elevated (one UAC prompt) so resumed tabs can share your Admin Terminal window. Turning off applies on the next launch." />
-                    <ToggleSwitch MinWidth="0" AutomationProperties.Name="Run as administrator"
-                                  OnContent="On" OffContent="Off"
-                                  IsEnabled="{x:Bind CanChangeElevation}"
-                                  IsOn="{x:Bind ViewModel.Settings.Current.RunElevated, Mode=TwoWay}" />
-                    <TextBlock Text="Administrator mode is disabled for this launch. Your saved preference is unchanged."
-                               TextWrapping="Wrap"
-                               Visibility="{x:Bind HasElevationOverride, Converter={StaticResource BoolToVis}}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Border Style="{StaticResource SettingsCardStyle}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Run as administrator"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="Turn on if your main Terminal runs as Administrator. The app restarts elevated (one UAC prompt) so resumed tabs can share your Admin Terminal window. Turning off applies on the next launch." />
+                            <ToggleSwitch MinWidth="0" AutomationProperties.Name="Run as administrator"
+                                          OnContent="On" OffContent="Off"
+                                          IsEnabled="{x:Bind CanChangeElevation}"
+                                          IsOn="{x:Bind ViewModel.Settings.Current.RunElevated, Mode=TwoWay}" />
+                            <TextBlock Text="Administrator mode is disabled for this launch. Your saved preference is unchanged."
+                                       TextWrapping="Wrap"
+                                       Visibility="{x:Bind HasElevationOverride, Converter={StaticResource BoolToVis}}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </Border>
 
+                    <Border Height="1" Margin="0,8,0,16"
+                            Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <TextBlock x:Name="ResumeSettingsHeading" Text="Resume &amp; terminal"
+                               Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8"
+                               TextWrapping="Wrap" AutomationProperties.HeadingLevel="Level2" />
+                    <Border Style="{StaticResource SettingsCardStyle}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Reuse my existing terminal window"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="When on, resuming a session opens a new tab in your most-recently-used Windows Terminal window (a new one is created only if none is open). When off, each resume opens its own new window." />
+                            <ToggleSwitch MinWidth="0" AutomationProperties.Name="Reuse my existing terminal window"
+                                          OnContent="On" OffContent="Off"
+                                          IsOn="{x:Bind ViewModel.Settings.Current.UseSharedTerminalWindow, Mode=TwoWay}" />
+                        </StackPanel>
+                    </Border>
                     <Border Margin="0,16,0,16" Padding="16"
                             Background="{ThemeResource LayerFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
@@ -236,33 +287,70 @@
                         </StackPanel>
                     </Border>
 
+                    <Border Height="1" Margin="0,8,0,16"
+                            Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <TextBlock x:Name="SessionSettingsHeading" Text="Sessions"
+                               Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8"
+                               AutomationProperties.HeadingLevel="Level2" />
                     <!-- Session-list hide filters. Each description must stand
                          on its own: a setting that explains itself in terms of
                          another setting can't be read or reasoned about
                          independently, so the shared facts (excluded from
                          search; pinned/renamed always visible) are stated in
                          full on both rather than cross-referenced. -->
-                    <TextBlock Text="Hide empty sessions"
-                               Style="{StaticResource BodyStrongTextBlockStyle}"
-                               TextWrapping="Wrap" Margin="0,8,0,0" />
-                    <TextBlock TextWrapping="Wrap"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               Text="Hides sessions that never held a conversation — the folders Copilot creates whenever a project is opened. They contain no messages, so nothing is lost. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
-                    <ToggleSwitch MinWidth="0" AutomationProperties.Name="Hide empty sessions"
-                                  OnContent="On" OffContent="Off"
-                                  IsOn="{x:Bind ViewModel.Settings.Current.HideEmptySessions, Mode=TwoWay}" />
+                    <Border Style="{StaticResource SettingsCardStyle}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Hide empty sessions"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="Hides sessions that never held a conversation — the folders Copilot creates whenever a project is opened. They contain no messages, so nothing is lost. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
+                            <ToggleSwitch MinWidth="0" AutomationProperties.Name="Hide empty sessions"
+                                          OnContent="On" OffContent="Off"
+                                          IsOn="{x:Bind ViewModel.Settings.Current.HideEmptySessions, Mode=TwoWay}" />
+                        </StackPanel>
+                    </Border>
 
-                    <TextBlock Text="Hide unnamed sessions"
-                               Style="{StaticResource BodyStrongTextBlockStyle}"
-                               TextWrapping="Wrap" Margin="0,8,0,0" />
-                    <TextBlock TextWrapping="Wrap"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               Text="Hides sessions that show only a UUID because they were never named. Some of these do hold real conversations. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
-                    <ToggleSwitch MinWidth="0" AutomationProperties.Name="Hide unnamed sessions"
-                                  OnContent="On" OffContent="Off"
-                                  IsOn="{x:Bind ViewModel.Settings.Current.HideUnnamedSessions, Mode=TwoWay}" />
+                    <Border Style="{StaticResource SettingsCardStyle}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Hide unnamed sessions"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="Hides sessions that show only a UUID because they were never named. Some of these do hold real conversations. Hidden sessions are excluded from search; pinned and renamed sessions always stay visible." />
+                            <ToggleSwitch MinWidth="0" AutomationProperties.Name="Hide unnamed sessions"
+                                          OnContent="On" OffContent="Off"
+                                          IsOn="{x:Bind ViewModel.Settings.Current.HideUnnamedSessions, Mode=TwoWay}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Height="1" Margin="0,8,0,16"
+                            Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <TextBlock x:Name="DiagnosticsSettingsHeading" Text="Diagnostics"
+                               Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8"
+                               AutomationProperties.HeadingLevel="Level2" />
+                    <Border Padding="16" Margin="0,0,0,16"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Monitoring" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock Text="Writes local diagnostic and performance logs, including Details rendering timings. Logs are not uploaded and may contain paths, commands, and error details."
+                                       TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <ToggleSwitch Header="Enable monitoring logs" AutomationProperties.Name="Enable monitoring logs"
+                                          Visibility="{x:Bind CanConfigureMonitoring, Converter={StaticResource BoolToVis}}"
+                                          IsOn="{x:Bind ViewModel.Settings.Current.EnableMonitoring, Mode=TwoWay}" />
+                            <TextBlock Text="Monitoring is always on in Dev. Production is opt-in and off by default."
+                                       TextWrapping="Wrap"
+                                       Visibility="{x:Bind IsDevChannel, Converter={StaticResource BoolToVis}}" />
+                            <TextBlock Text="{x:Bind MonitoringLogPath}" TextWrapping="Wrap"
+                                       IsTextSelectionEnabled="True" FontSize="12"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
-            </ScrollViewer>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
             <ScrollViewer x:Name="InformationPane" Grid.Row="1" Visibility="Collapsed"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           HorizontalScrollMode="Disabled" HorizontalContentAlignment="Stretch">

@@ -340,6 +340,16 @@ button, separate from its draggable label region. Each opens a full-size pane be
 replacing the search bar, session list/details/notes, and session status footer rather than opening
 a popup. Both panes scroll vertically as needed; text wraps without horizontal scrolling.
 Settings retain their existing immediate auto-save and live-filter behavior.
+Each independent setting has its own grey, theme-aware card containing its description
+and controls. Resume command remains one distinct group with its existing box unchanged.
+Settings uses WindowRescue's two-column navigation pattern: an independently scrolling,
+selectable group list on the left jumps to headings in one continuous options list on
+the right, with horizontal dividers between groups. The auto-save hint stays fixed above
+both columns. **General** contains sign-in startup (when supported) and administrator
+mode; **Resume & terminal** contains terminal reuse and the Resume command box;
+**Sessions** contains the hide-empty and hide-unnamed filters; **Diagnostics** contains
+monitoring. Mouse or keyboard group selection only scrolls the existing controls; it
+does not change preferences. Selecting the same group again returns to its heading.
 The pane opens from in-memory settings immediately, then refreshes shared settings and
 Windows auto-start state independently in the background. File reads/parsing run on a
 worker; merges and bound-property notifications stay on the UI context. Concurrent

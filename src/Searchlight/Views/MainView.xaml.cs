@@ -172,6 +172,41 @@ public sealed partial class MainView : UserControl
         timing?.CompleteWork();
     }
 
+    private void OnSettingsOptionsLoaded(object sender, RoutedEventArgs e)
+    {
+        if (SettingsGroupList.SelectedIndex < 0)
+            SettingsGroupList.SelectedIndex = 0;
+    }
+
+    private void OnSettingsGroupSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SettingsGroupList.SelectedItem is ListViewItem group)
+            JumpToSettingsGroup(group);
+    }
+
+    private void OnSettingsGroupItemClick(object sender, ItemClickEventArgs e)
+    {
+        // Re-clicking the selected group returns to its heading after manual scrolling.
+        if (e.ClickedItem is ListViewItem group)
+            JumpToSettingsGroup(group);
+    }
+
+    private void JumpToSettingsGroup(ListViewItem group)
+    {
+        // ASSUMPTION: navigation is view-only; existing controls and unsaved text stay alive.
+        FrameworkElement heading = group.Tag switch
+        {
+            "General" => GeneralSettingsHeading,
+            "Resume" => ResumeSettingsHeading,
+            "Sessions" => SessionSettingsHeading,
+            "Diagnostics" => DiagnosticsSettingsHeading,
+            _ => throw new InvalidOperationException("Unknown settings navigation group.")
+        };
+        double top = heading.TransformToVisual(SettingsOptions).TransformPoint(new Windows.Foundation.Point()).Y;
+        SettingsOptionsScrollViewer.ChangeView(null,
+            Math.Clamp(top, 0, SettingsOptionsScrollViewer.ScrollableHeight), null, disableAnimation: true);
+    }
+
     private async Task ReloadPaneSettingsAsync(PaneNavigationMonitor.Measurement? timing)
     {
         long started = timing?.StartPhase() ?? 0;
