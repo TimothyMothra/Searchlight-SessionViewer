@@ -298,9 +298,12 @@ Microsoft.NET.Test.Sdk 17.11.1 · xunit 2.9.2 · xunit.runner.visualstudio 2.8.2
 
 Production also exposes **Start Searchlight when I sign in**, backed directly by Windows,
 not the shared JSON settings. The installed unpackaged Production app manages its Startup
-shortcut; packaged Production uses `StartupTask`. Windows-disabled or policy-controlled
+shortcut; standalone packaged Production uses `StartupTask`. Windows-disabled or policy-controlled
 entries are not overridden. Upgrades preserve the existing startup choice.
-Dev has neither this control nor a startup-task declaration.
+Dev and MSIX packages built with `tools\Build-Msix.ps1 -ForBundle` have neither this
+control nor a startup-task declaration. Bundle inputs embed matching capability metadata
+so they do not query a missing OS task; normal local Production keeps auto-start support.
+See [MSIX distribution](msix.md) for the bundle workflow.
 `pwsh -File tools\Test-InstallStartup.ps1` verifies upgrade preservation using
 temporary redirected installer paths, without changing actual Windows startup entries.
 

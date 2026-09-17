@@ -116,7 +116,8 @@ To build another architecture for the **same release**, pass the allocated name:
 
 Production requires its final package name, publisher, and certificate. Its build name
 comes from the same sequence as Dev unless an allocated release name is supplied.
-It does not use Dev's identity or automatically install:
+It does not use Dev's identity or automatically install. A standalone Production MSIX
+retains startup registration by default:
 
 ```powershell
 .\tools\Build-Msix.ps1 -Channel Production -Architecture x64 `
@@ -140,18 +141,24 @@ containing **x64 + ARM64**, using `TimothyMothra.Searchlight` and
 an explicit, separate single-package testing workflow. Do not ask for the channel/signing
 choice again unless the user requests a change.
 
-**Temporary startup omission:** all MSIX packages (including Production bundle inputs)
-omit `windows.startupTask` extensions and `StartupTask` declarations. Build and package
-validation reject either declaration, so bundling previously generated startup-enabled
-packages is also rejected. Packaged Settings hides the startup option and its service
-reports it unavailable rather than trying to access a missing task. The unpackaged
-Production installation retains its existing startup shortcut behavior.
+**Explicit bundle-only startup omission:** build both component packages with
+`Build-Msix.ps1 -ForBundle`. This removes the `windows.startupTask` extension and
+`StartupTask` declaration from the generated manifest **before compilation**, and passes
+`SearchlightStartupTaskEnabled=false` to compile matching assembly metadata. It does not
+modify the tracked template or strip/re-sign an already-built package. Unrelated manifest
+declarations and high-resolution icons are preserved.
 
-**TODO (`packaged-startup`):** remove this temporary restriction once the distribution
-contract supports startup registration. Restore Production's manifest declaration and
-packaged startup service/UI together, update the build/package rejection rules and tests,
-and verify upgrade, user-disabled, and policy-controlled states. Dev must remain excluded
-from auto-start. Do not restore startup merely by removing a validation check.
+Standalone Production builds without `-ForBundle` retain startup registration and compile
+`SearchlightStartupTaskEnabled=true`. Dev is always startup-free, with or without
+`-ForBundle`. Bundle-input Settings hides startup and its service reports it unavailable;
+standalone Production keeps the Windows startup-task setting/API. Unpackaged Production
+retains its existing Startup-folder shortcut behavior and defaults to startup support.
+
+`Bundle-Msix.ps1` rejects startup declarations in **either** architecture, including disabled
+tasks or incomplete declarations. It also validates that each component's managed assembly
+capability agrees with its manifest. Previously built standalone Production packages cannot
+be used as bundle inputs: rebuild both with `-ForBundle`. Build and bundle result objects
+expose `HasStartupRegistration`; bundle results are always `false`.
 
 Use the current release's build name when the source matches an already-built local release;
 otherwise allocate one shared name. For example:
@@ -160,10 +167,10 @@ otherwise allocate one shared name. For example:
 $buildName = .\tools\Get-NextBuildVersion.ps1
 $x64 = .\tools\Build-Msix.ps1 -Channel Production -Architecture x64 `
     -PackageName TimothyMothra.Searchlight -Publisher 'CN=Production Placeholder' `
-    -BuildName $buildName -Unsigned
+    -BuildName $buildName -ForBundle -Unsigned
 $arm64 = .\tools\Build-Msix.ps1 -Channel Production -Architecture arm64 `
     -PackageName TimothyMothra.Searchlight -Publisher 'CN=Production Placeholder' `
-    -BuildName $buildName -Unsigned
+    -BuildName $buildName -ForBundle -Unsigned
 $version = ([version]$buildName).ToString()
 $output = ".\artifacts\msix\Production\$version\Searchlight_${version}_x64_arm64.msixbundle"
 .\tools\Bundle-Msix.ps1 -X64Package $x64.Path -Arm64Package $arm64.Path `
@@ -190,6 +197,7 @@ symbols or installer scripts.
 
 Run `tools\Test-MsixBundle.ps1 -X64Package $x64.Path -Arm64Package $arm64.Path`
 to exercise bundle creation and identity/architecture guardrails using temporary output.
+Add `-ValidationOnly` to run rejection checks without creating a bundle.
 
 For a signed bundle, omit `-Unsigned` and supply `-CertificateThumbprint` and optionally
 `-TimestampUrl`, just as for individual packages. The signing certificate's subject must
@@ -253,9 +261,9 @@ Each channel has its own process mutex, activation event, window/tray label, and
 `Searchlight.Unpackaged.log`. Dev always writes monitoring logs; Production and unpackaged
 builds require the shared `EnableMonitoring` opt-in, which defaults off. A second launch
 activates only its own channel.
-Dev has an orange badge on its package logos. Neither Dev nor packaged Production declares
-a startup task or exposes an auto-start option while the `packaged-startup` restriction
-above is in effect. Neither package creates a Startup-folder shortcut.
+Dev has an orange badge on its package logos. Dev and `-ForBundle` Production packages
+declare no startup task and expose no auto-start option. Standalone Production MSIX keeps
+its startup task and setting. No packaged variant creates a Startup-folder shortcut.
 The unpackaged Production installation manages its existing Startup shortcut, and its
 installer preserves an absent/disabled shortcut on upgrades instead of re-enabling it.
 
@@ -268,6 +276,7 @@ does not claim store certification or silently bypass policy.
 
 ```powershell
 pwsh -NoProfile -File .\tools\Test-BuildVersion.ps1
+pwsh -NoProfile -File .\tools\Test-MsixStartup.ps1
 
 $inspection = .\tools\Build-Msix.ps1 -Unsigned
 .\tools\Test-MsixWorkflow.ps1 -UnsignedDevPackage $inspection.Path
@@ -277,7 +286,18 @@ dotnet test .\src\Searchlight.Core.Tests\Searchlight.Core.Tests.csproj
 
 The package checks cover identity, signatures, expected runtime files, native
 architecture, accidental private-key/session-data inclusion, and installer identity
-guards. Runtime qualification also needs simultaneous channels, updates, shared-data
+guards. Startup validation inspects `Searchlight.dll` using .NET's `PEReader` without
+loading WinUI or resolving its dependencies. Missing, duplicate, non-boolean, or
+manifest-inconsistent `SearchlightStartupTaskEnabled` metadata is rejected. Older
+packages without this metadata must be rebuilt before these checks can accept them.
+
+`Test-MsixStartup.ps1` uses isolated, inert fixtures and MSBuild property evaluation:
+it does not build the application, allocate a release version, sign, install, or produce
+a distributable bundle. It covers standalone Production, explicit `-ForBundle`, Dev,
+the unpackaged default, preservation of unrelated declarations, both architecture inputs,
+and matching/mismatched/missing/invalid/duplicate metadata.
+
+Runtime qualification also needs simultaneous channels, updates, shared-data
 conflicts, tray/clipboard/resume/elevation, clean-machine dependency checks, and real
 ARM64 execution. Building an ARM64 artifact on x64 is not an ARM64 runtime test.
 

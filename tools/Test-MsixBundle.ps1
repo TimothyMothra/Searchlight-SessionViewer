@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$X64Package,
-    [Parameter(Mandatory)][string]$Arm64Package
+    [Parameter(Mandatory)][string]$Arm64Package,
+    [switch]$ValidationOnly
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Msix-Common.ps1')
@@ -20,9 +21,11 @@ function Assert-Rejected([scriptblock]$Action, [string]$Message) {
 
 try {
     $output = Join-Path $root 'candidate.msixbundle'
-    $result = & $script -X64Package $X64Package -Arm64Package $Arm64Package -OutputPath $output -Unsigned
-    if ($result.Signed -or ($result.Architectures -join ',') -ne 'x64,arm64') {
-        throw 'Expected an unsigned dual-architecture result.'
+    if (-not $ValidationOnly) {
+        $result = & $script -X64Package $X64Package -Arm64Package $Arm64Package -OutputPath $output -Unsigned
+        if ($result.Signed -or $result.HasStartupRegistration -or ($result.Architectures -join ',') -ne 'x64,arm64') {
+            throw 'Expected an unsigned, startup-free dual-architecture result.'
+        }
     }
     Assert-Rejected {
         & $script -X64Package $X64Package -Arm64Package $X64Package -OutputPath $output -Unsigned
@@ -48,30 +51,42 @@ try {
         & $script -X64Package $X64Package -Arm64Package $mismatch -OutputPath $output -Unsigned
     } 'same package name, publisher, version'
 
-    $info = Get-MsixManifest $Arm64Package
-    foreach ($declaration in @(
-        '<desktop:Extension Category="windows.startupTask" />',
-        '<desktop:StartupTask TaskId="SearchlightStartup" Enabled="false" />'
-    )) {
-        # Startup is prohibited even when disabled or only the extension is present.
-        $startupPackage = Join-Path $root "startup-$([guid]::NewGuid()).msix"
-        $zip = [IO.Compression.ZipFile]::Open($startupPackage, [IO.Compression.ZipArchiveMode]::Create)
-        try {
-            $entry = $zip.CreateEntry('AppxManifest.xml')
-            $writer = [IO.StreamWriter]::new($entry.Open())
+    foreach ($architecture in @('x64', 'arm64')) {
+        $original = if ($architecture -eq 'x64') { $X64Package } else { $Arm64Package }
+        $info = Get-MsixManifest $original
+        foreach ($declaration in @(
+            '<desktop:Extension Category="windows.startupTask" />',
+            '<desktop:StartupTask TaskId="SearchlightStartup" Enabled="false" />',
+            '<desktop:Extension Category="windows.startupTask"><desktop:StartupTask TaskId="SearchlightStartup" Enabled="false" /></desktop:Extension>'
+        )) {
+            # Startup is prohibited even when disabled or only the extension is present.
+            $startupPackage = Join-Path $root "startup-$([guid]::NewGuid()).msix"
+            $zip = [IO.Compression.ZipFile]::Open($startupPackage, [IO.Compression.ZipArchiveMode]::Create)
             try {
-                $name = [Security.SecurityElement]::Escape($info.Name)
-                $publisher = [Security.SecurityElement]::Escape($info.Publisher)
-                $appId = [Security.SecurityElement]::Escape($info.ApplicationId)
-                $writer.Write("<Package xmlns:desktop=`"http://schemas.microsoft.com/appx/manifest/desktop/windows10`"><Identity Name=`"$name`" Publisher=`"$publisher`" Version=`"$($info.Version)`" ProcessorArchitecture=`"arm64`"/><Applications><Application Id=`"$appId`"><Extensions>$declaration</Extensions></Application></Applications></Package>")
+                $entry = $zip.CreateEntry('AppxManifest.xml')
+                $writer = [IO.StreamWriter]::new($entry.Open())
+                try {
+                    $name = [Security.SecurityElement]::Escape($info.Name)
+                    $publisher = [Security.SecurityElement]::Escape($info.Publisher)
+                    $appId = [Security.SecurityElement]::Escape($info.ApplicationId)
+                    $writer.Write("<Package xmlns:desktop=`"http://schemas.microsoft.com/appx/manifest/desktop/windows10`"><Identity Name=`"$name`" Publisher=`"$publisher`" Version=`"$($info.Version)`" ProcessorArchitecture=`"$architecture`"/><Applications><Application Id=`"$appId`"><Extensions>$declaration</Extensions></Application></Applications></Package>")
+                }
+                finally { $writer.Dispose() }
             }
-            finally { $writer.Dispose() }
+            finally { $zip.Dispose() }
+            Assert-Rejected {
+                $inputs = @{ X64Package = $X64Package; Arm64Package = $Arm64Package }
+                if ($architecture -eq 'x64') { $inputs.X64Package = $startupPackage }
+                else { $inputs.Arm64Package = $startupPackage }
+                & $script @inputs -OutputPath $output -Unsigned
+            } 'Bundle inputs must be startup-free'
         }
-        finally { $zip.Dispose() }
-        Assert-Rejected {
-            & $script -X64Package $X64Package -Arm64Package $startupPackage -OutputPath $output -Unsigned
-        } 'Packaged startup registration is temporarily unsupported'
     }
-    Write-Host 'PASS: dual-architecture bundle, payload hashes, unsigned output, identity guards, and startup rejection.'
+    if ($ValidationOnly) {
+        Write-Host 'PASS: bundle input identity/architecture guards and startup rejection for both architectures (no bundle built).'
+    }
+    else {
+        Write-Host 'PASS: dual-architecture bundle, payload hashes, unsigned output, identity guards, and startup rejection.'
+    }
 }
 finally { [IO.Directory]::Delete($root, $true) }

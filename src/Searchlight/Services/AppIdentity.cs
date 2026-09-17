@@ -19,6 +19,15 @@ internal static partial class AppIdentity
 
     public static bool IsPackaged { get; } = HasPackageIdentity();
 
+    // ASSUMPTION: MSIX builds set this metadata together with their manifest.
+    // Unpackaged Production continues to manage its existing startup shortcut.
+    public static bool SupportsStartup => Channel == "Production" && (!IsPackaged || StartupTaskEnabled);
+
+    private static bool StartupTaskEnabled { get; } = bool.Parse(typeof(AppIdentity).Assembly
+        .GetCustomAttributes<AssemblyMetadataAttribute>()
+        .Single(attribute => attribute.Key == "SearchlightStartupTaskEnabled").Value
+        ?? throw new InvalidOperationException("The build has no startup-task capability metadata."));
+
     // ASSUMPTION: WinRT image loading requires application URIs in MSIX, while
     // the unpackaged host needs absolute file URIs.
     public static Uri AssetUri(string fileName) => IsPackaged

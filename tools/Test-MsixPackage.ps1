@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedPublisher,
     [Parameter(Mandatory)][version]$ExpectedVersion,
     [Parameter(Mandatory)][ValidateSet('x64', 'arm64')][string]$ExpectedArchitecture,
+    [Nullable[bool]]$ExpectedStartupRegistration,
     [switch]$RequireSignature
 )
 . (Join-Path $PSScriptRoot 'Msix-Common.ps1')
@@ -13,8 +14,12 @@ if ($manifest.Name -cne $ExpectedName -or $manifest.Publisher -cne $ExpectedPubl
     $manifest.Version -ne $ExpectedVersion -or $manifest.Architecture -ne $ExpectedArchitecture) {
     throw "Unexpected MSIX identity: $($manifest | ConvertTo-Json -Compress)"
 }
-if ($manifest.HasStartupRegistration) {
-    throw 'Packaged startup registration is temporarily unsupported.'
+if ($null -ne $ExpectedStartupRegistration -and
+    $manifest.HasStartupRegistration -ne $ExpectedStartupRegistration) {
+    throw "Unexpected startup registration: expected $ExpectedStartupRegistration, found $($manifest.HasStartupRegistration)."
+}
+if ($manifest.Name -ceq 'TimothyMothra.Searchlight.Dev' -and $manifest.HasStartupRegistration) {
+    throw 'Dev packages must be startup-free.'
 }
 # ASSUMPTION: this is the self-contained WinUI/.NET distribution, not just the managed DLL.
 foreach ($required in @('Searchlight.exe', 'Searchlight.dll', 'resources.pri',
@@ -23,6 +28,17 @@ foreach ($required in @('Searchlight.exe', 'Searchlight.dll', 'resources.pri',
 }
 $zip = [IO.Compression.ZipFile]::OpenRead([IO.Path]::GetFullPath($Path))
 try {
+    $stream = $zip.GetEntry('Searchlight.dll').Open()
+    $memory = [IO.MemoryStream]::new()
+    try {
+        $stream.CopyTo($memory)
+        $memory.Position = 0
+        $startupEnabled = Get-MsixStartupTaskEnabled -Stream $memory
+        if ($startupEnabled -ne $manifest.HasStartupRegistration) {
+            throw 'SearchlightStartupTaskEnabled assembly metadata disagrees with the manifest startup registration.'
+        }
+    }
+    finally { $memory.Dispose(); $stream.Dispose() }
     foreach ($native in @('Searchlight.exe', 'coreclr.dll', 'e_sqlite3.dll')) {
         $stream = $zip.GetEntry($native).Open()
         $memory = [IO.MemoryStream]::new()

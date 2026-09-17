@@ -69,3 +69,66 @@ function Get-MsixManifest {
     }
     finally { $zip.Dispose() }
 }
+
+function Set-MsixStartupTask {
+    param(
+        [Parameter(Mandatory)][xml]$Manifest,
+        [Parameter(Mandatory)][bool]$Enabled,
+        [Parameter(Mandatory)][string]$DisplayName
+    )
+    $extensions = @($Manifest.SelectNodes("//*[local-name()='Extension' and @Category='windows.startupTask']"))
+    $tasks = @($Manifest.SelectNodes("//*[local-name()='StartupTask']"))
+    if ($extensions.Count -ne 1 -or $tasks.Count -ne 1 -or
+        $tasks[0].ParentNode -ne $extensions[0] -or $tasks[0].GetAttribute('TaskId') -cne 'SearchlightStartup') {
+        throw 'The manifest template must declare exactly one SearchlightStartup task inside its startup extension.'
+    }
+    if ($Enabled) {
+        $tasks[0].SetAttribute('DisplayName', $DisplayName)
+        $tasks[0].SetAttribute('Enabled', 'true')
+    }
+    else {
+        # ASSUMPTION: omission removes the capability, not merely Enabled=false;
+        # unrelated extensions and capabilities must survive unchanged.
+        $container = $extensions[0].ParentNode
+        [void]$container.RemoveChild($extensions[0])
+        if ($container.SelectNodes('*').Count -eq 0) {
+            [void]$container.ParentNode.RemoveChild($container)
+        }
+    }
+}
+
+function Get-MsixStartupTaskEnabled {
+    param([Parameter(Mandatory)][IO.Stream]$Stream)
+    # ASSUMPTION: inspect bytes only; loading a WinUI assembly would resolve host
+    # dependencies and can lock package payloads. PEReader ships with PowerShell 7.
+    $pe = [System.Reflection.PortableExecutable.PEReader]::new(
+        $Stream, [System.Reflection.PortableExecutable.PEStreamOptions]::LeaveOpen)
+    try {
+        if (-not $pe.HasMetadata) { throw 'Searchlight.dll has no managed metadata.' }
+        $metadata = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($pe)
+        if (-not $metadata.IsAssembly) { throw 'Searchlight.dll is not a managed assembly.' }
+        $values = @(
+            foreach ($handle in $metadata.GetAssemblyDefinition().GetCustomAttributes()) {
+                $attribute = $metadata.GetCustomAttribute($handle)
+                if ($attribute.Constructor.Kind -ne [System.Reflection.Metadata.HandleKind]::MemberReference) { continue }
+                $constructor = $metadata.GetMemberReference(
+                    [System.Reflection.Metadata.MemberReferenceHandle]$attribute.Constructor)
+                if ($constructor.Parent.Kind -ne [System.Reflection.Metadata.HandleKind]::TypeReference) { continue }
+                $type = $metadata.GetTypeReference([System.Reflection.Metadata.TypeReferenceHandle]$constructor.Parent)
+                if ($metadata.GetString($type.Namespace) -cne 'System.Reflection' -or
+                    $metadata.GetString($type.Name) -cne 'AssemblyMetadataAttribute') { continue }
+                $blob = $metadata.GetBlobReader($attribute.Value)
+                if ($blob.ReadUInt16() -ne 1) { throw 'Invalid assembly metadata attribute prolog.' }
+                $key = $blob.ReadSerializedString()
+                $value = $blob.ReadSerializedString()
+                if ($key -ceq 'SearchlightStartupTaskEnabled') { $value }
+            }
+        )
+        $enabled = $false
+        if ($values.Count -ne 1 -or -not [bool]::TryParse($values[0], [ref]$enabled)) {
+            throw 'Searchlight.dll must contain exactly one boolean SearchlightStartupTaskEnabled assembly metadata value.'
+        }
+        return $enabled
+    }
+    finally { $pe.Dispose() }
+}

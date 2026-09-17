@@ -21,13 +21,16 @@ if ($x64.Name -cne $arm64.Name -or $x64.Publisher -cne $arm64.Publisher -or
     $x64.Version -ne $arm64.Version -or $x64.ApplicationId -cne $arm64.ApplicationId) {
     throw 'Bundle inputs must have the same package name, publisher, version, and application ID.'
 }
+if ($x64.HasStartupRegistration -or $arm64.HasStartupRegistration) {
+    throw 'Bundle inputs must be startup-free. Rebuild both architectures with Build-Msix.ps1 -ForBundle.'
+}
 foreach ($inputPackage in @(
     @{ Path = $X64Package; Architecture = 'x64' },
     @{ Path = $Arm64Package; Architecture = 'arm64' }
 )) {
     $null = & (Join-Path $PSScriptRoot 'Test-MsixPackage.ps1') -Path $inputPackage.Path `
         -ExpectedName $x64.Name -ExpectedPublisher $x64.Publisher -ExpectedVersion $x64.Version `
-        -ExpectedArchitecture $inputPackage.Architecture
+        -ExpectedArchitecture $inputPackage.Architecture -ExpectedStartupRegistration $false
 }
 if (-not $Unsigned) { Assert-MsixSigningCertificate $CertificateThumbprint $x64.Publisher }
 
@@ -95,4 +98,5 @@ if (-not $Unsigned) {
     Version = $x64.Version.ToString()
     Architectures = @('x64', 'arm64')
     Signed = -not $Unsigned
+    HasStartupRegistration = $false
 }

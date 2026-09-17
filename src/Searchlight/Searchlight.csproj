@@ -26,6 +26,9 @@
          Windows App SDK runtime install is required. -->
     <SearchlightPackaging Condition="'$(SearchlightPackaging)' == ''">None</SearchlightPackaging>
     <SearchlightChannel Condition="'$(SearchlightChannel)' == ''">Unpackaged</SearchlightChannel>
+    <!-- ASSUMPTION: bundle-input and Dev MSIX builds explicitly disable startup;
+         normal local Production builds retain their existing startup support. -->
+    <SearchlightStartupTaskEnabled Condition="'$(SearchlightStartupTaskEnabled)' == ''">true</SearchlightStartupTaskEnabled>
     <WindowsPackageType Condition="'$(SearchlightPackaging)' != 'Msix'">None</WindowsPackageType>
     <WindowsPackageType Condition="'$(SearchlightPackaging)' == 'Msix'">MSIX</WindowsPackageType>
     <AppxPackage Condition="'$(SearchlightPackaging)' == 'Msix'">true</AppxPackage>
@@ -67,10 +70,15 @@
            Text="SearchlightChannel must be Unpackaged, Dev, or Production." />
     <Error Condition="'$(SearchlightPackaging)' == 'Msix' and ('$(SearchlightChannel)' == 'Unpackaged' or !Exists('$(SearchlightPackageManifest)'))"
            Text="Build MSIX using tools\Build-Msix.ps1 with a channel and generated package manifest." />
+    <Error Condition="'$(SearchlightStartupTaskEnabled)' != 'true' and '$(SearchlightStartupTaskEnabled)' != 'false'"
+           Text="SearchlightStartupTaskEnabled must be true or false." />
+    <Error Condition="'$(SearchlightPackaging)' != 'Msix' and '$(SearchlightStartupTaskEnabled)' != 'true'"
+           Text="Disabling startup support is only supported for MSIX builds." />
   </Target>
 
   <ItemGroup>
     <AssemblyMetadata Include="SearchlightChannel" Value="$(SearchlightChannel)" />
+    <AssemblyMetadata Include="SearchlightStartupTaskEnabled" Value="$(SearchlightStartupTaskEnabled)" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(SearchlightPackaging)' == 'Msix'">

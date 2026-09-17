@@ -10,6 +10,7 @@ param(
     [string]$CertificateThumbprint,
     [uri]$TimestampUrl,
     [switch]$Unsigned,
+    [switch]$ForBundle,
     [switch]$Restore
 )
 . (Join-Path $PSScriptRoot 'Msix-Common.ps1')
@@ -74,11 +75,9 @@ $manifest.Package.Identity.SetAttribute('ProcessorArchitecture', $Architecture)
 $manifest.Package.Properties.DisplayName = $displayName
 $visuals = $manifest.SelectSingleNode("//*[local-name()='VisualElements']")
 $visuals.SetAttribute('DisplayName', $displayName)
-# ASSUMPTION: every package may become a bundle input. Fail closed if startup
-# registration returns before the temporary distribution restriction is retired.
-if ($manifest.SelectNodes("//*[local-name()='StartupTask' or @Category='windows.startupTask']").Count -gt 0) {
-    throw 'Packaged startup registration is temporarily unsupported.'
-}
+# ASSUMPTION: bundle omission is opt-in; standalone Production retains startup support.
+$startupEnabled = $Channel -eq 'Production' -and -not $ForBundle
+Set-MsixStartupTask -Manifest $manifest -Enabled $startupEnabled -DisplayName $displayName
 $manifestPath = Join-Path $stage 'Package.appxmanifest'
 $manifest.Save($manifestPath)
 
@@ -88,6 +87,7 @@ $manifest.Save($manifestPath)
 $arguments = @((Join-Path $projectRoot 'Searchlight.csproj'), '-nologo', '-m:1', '-t:Build', '-v:minimal',
     "-p:Configuration=$Configuration", "-p:Platform=$Architecture", "-p:RuntimeIdentifier=win-$Architecture",
     '-p:SearchlightPackaging=Msix', "-p:SearchlightChannel=$Channel", "-p:SearchlightBuildVersion=$BuildName",
+    "-p:SearchlightStartupTaskEnabled=$($startupEnabled.ToString().ToLowerInvariant())",
     "-p:SearchlightPackageManifest=$manifestPath", "-p:SearchlightPackageAssets=$assets",
     '-p:GenerateAppxPackageOnBuild=true', '-p:AppxPackageSigningEnabled=false',
     '-p:UapAppxPackageBuildMode=SideloadOnly', '-p:AppxBundle=Never',
@@ -104,6 +104,7 @@ if (-not $Unsigned) {
 }
 $result = & (Join-Path $PSScriptRoot 'Test-MsixPackage.ps1') -Path $package -ExpectedName $PackageName `
     -ExpectedPublisher $Publisher -ExpectedVersion $PackageVersion -ExpectedArchitecture $Architecture `
+    -ExpectedStartupRegistration $startupEnabled `
     -RequireSignature:(-not $Unsigned)
 & (Join-Path $PSScriptRoot 'Test-MsixLogos.ps1') -PackagePath $package
 [pscustomobject]@{
@@ -115,4 +116,5 @@ $result = & (Join-Path $PSScriptRoot 'Test-MsixPackage.ps1') -Path $package -Exp
     Version = $result.Version.ToString()
     Architecture = $result.Architecture
     Signed = -not $Unsigned
+    HasStartupRegistration = $result.HasStartupRegistration
 }
