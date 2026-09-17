@@ -222,6 +222,9 @@ The bordered **Filters:** pane sits inline beside Search in the top toolbar, wit
 and **In use**, **CLI**, and **App** tags in one row. The filter pane sizes to its labels
 and matches the standard search field's 32px height; Search expands to fill the remaining
 toolbar width. The tags are independent on/off toggles, initially off.
+The toolbar has three stable regions (Filters, Search, Refresh), with 16px outer padding
+and 16px gaps. Clear appears inside Search with reserved text padding, and the loading
+indicator replaces Refresh's glyph. Neither changes Search's bounds or the outer gaps.
 Every enabled tag must match (**AND**), along with any text search. CLI and App are mutually
 exclusive source tags, so selecting both intentionally produces no matches. All tags off means
 no tag restriction. Unknown metadata does not match a requested tag; newly enriched matching

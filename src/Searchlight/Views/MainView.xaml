@@ -326,17 +326,16 @@
 
         <!-- Filters + search + refresh. Both action buttons use the app-wide "<glyph> <label>"
              pattern (see Pin/Rename/Resume) so no control is icon-only. -->
-        <Grid x:Name="SessionSearchBar" Grid.Row="2" Padding="16,4,16,8" ColumnSpacing="12">
+        <Grid x:Name="SessionSearchBar" Grid.Row="2" Padding="16,4,16,8" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <!-- ASSUMPTION: the standard search field is 32px high. Filters size
-                 to their labels; Search receives all remaining toolbar width. -->
+                 to their labels; Search receives all remaining toolbar width.
+                 Clear and loading stay inside existing controls so gaps never shift. -->
             <Border Grid.Column="0" Height="32" Padding="8,0" VerticalAlignment="Center"
                     BorderThickness="1" CornerRadius="8"
                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
@@ -362,38 +361,42 @@
                 </StackPanel>
             </Border>
 
-            <!-- Loaded handler neutralizes the TextBox's built-in inline delete part,
-                 whose bare "x" glyph carries no visible label; the Clear button below
-                 replaces it. -->
-            <TextBox Grid.Column="1"
-                     PlaceholderText="Search name, id, folder, branch, prompt…"
-                     Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                     Loaded="OnSearchBoxLoaded"
-                     VerticalAlignment="Center"
-                     HorizontalAlignment="Stretch" />
+            <!-- Fixed trailing text padding reserves the labelled Clear action,
+                 replacing the template's unlabelled delete part without resizing Search. -->
+            <Grid Grid.Column="1" VerticalAlignment="Center">
+                <TextBox Padding="10,5,76,5"
+                         PlaceholderText="Search name, id, folder, branch, prompt…"
+                         Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Loaded="OnSearchBoxLoaded"
+                         VerticalAlignment="Center"
+                         HorizontalAlignment="Stretch" />
+                <Button Width="64" Height="24" MinWidth="0" MinHeight="0"
+                        Padding="6,0" Margin="4,0" FontSize="12"
+                        Background="Transparent" BorderThickness="0"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Command="{x:Bind ViewModel.ClearSearchCommand}"
+                        Visibility="{x:Bind ViewModel.HasSearchText, Mode=OneWay, Converter={StaticResource BoolToVis}}"
+                        AutomationProperties.Name="Clear search"
+                        ToolTipService.ToolTip="Clear the search box">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                        <TextBlock Text="Clear" />
+                    </StackPanel>
+                </Button>
+            </Grid>
 
             <Button Grid.Column="2"
-                    Command="{x:Bind ViewModel.ClearSearchCommand}"
-                    Visibility="{x:Bind ViewModel.HasSearchText, Mode=OneWay, Converter={StaticResource BoolToVis}}"
-                    VerticalAlignment="Center"
-                    ToolTipService.ToolTip="Clear the search box">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE711;" FontSize="14" />
-                    <TextBlock Text="Clear" />
-                </StackPanel>
-            </Button>
-
-            <ProgressRing Grid.Column="3"
-                          IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
-                          Width="20" Height="20"
-                          VerticalAlignment="Center" />
-
-            <Button Grid.Column="4"
                     Command="{x:Bind ViewModel.RefreshCommand}"
                     VerticalAlignment="Center"
                     ToolTipService.ToolTip="Reload sessions from disk">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                    <Grid Width="14" Height="14">
+                        <FontIcon Glyph="&#xE72C;" FontSize="14"
+                                  Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVis}, ConverterParameter=invert}" />
+                        <ProgressRing Width="14" Height="14" MinWidth="0" MinHeight="0"
+                                      IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
+                                      Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVis}}" />
+                    </Grid>
                     <TextBlock Text="Refresh" />
                 </StackPanel>
             </Button>
